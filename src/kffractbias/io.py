@@ -467,14 +467,6 @@ def annotation_locus_order(
     gff_path: str | Path, *, feature: str, attribute: str
 ) -> tuple[Gene, ...]:
     """Order all annotated loci, including loci without supplied sequences."""
-    identifiers = {
-        identifier
-        for row in _iter_gff(gff_path)
-        if row.feature == feature
-        for identifier in row.attributes.get(attribute, ())
-    }
-    intervals = _mapped_gff_intervals(gff_path, feature, attribute, identifiers)
-    loci, _unresolved = _annotation_loci(gff_path, feature, attribute, identifiers)
     by_locus: dict[str, Gene] = {}
 
     def add(gene: Gene, locus: str) -> None:
@@ -492,10 +484,30 @@ def annotation_locus_order(
             )
         by_locus[locus] = replace(gene, gene_id=locus)
 
-    for gene in intervals:
-        add(gene, loci[gene.gene_id])
+    # A gene/ID row already names its physical locus. For other feature/ID
+    # combinations, retain the existing parent-resolution path.
+    direct = feature == "gene" and attribute == "ID"
+    if not direct:
+        identifiers = {
+            identifier
+            for row in _iter_gff(gff_path)
+            if row.feature == feature
+            for identifier in row.attributes.get(attribute, ())
+        }
+        intervals = _mapped_gff_intervals(gff_path, feature, attribute, identifiers)
+        loci, _unresolved = _annotation_loci(gff_path, feature, attribute, identifiers)
+        for gene in intervals:
+            add(gene, loci[gene.gene_id])
     for row in _iter_gff(gff_path):
         if row.feature == "gene":
+            if direct:
+                ids = row.attributes.get("ID", ())
+                if len(ids) > 1 and len(set(ids)) > 1:
+                    raise ValueError(
+                        f"Gene row names multiple gene loci at {gff_path}:{row.line_number}"
+                    )
+                for identifier in ids:
+                    validate_gene_identifier(identifier, "GFF", f"{gff_path}:{row.line_number}")
             values = next(
                 (
                     row.attributes[key]

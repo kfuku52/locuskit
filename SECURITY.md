@@ -1,16 +1,15 @@
 # Security policy
 
-Before the first tagged release, security fixes are provided on the current
-`master` development line. After a release is published, the latest tagged
-release is supported. Historical untagged snapshots are not maintained separately.
+Before the first tagged release, security fixes target the `main` branch.
+After publication, the latest tagged release is supported.
 
-Please [report suspected vulnerabilities privately on GitHub](https://github.com/kfuku52/kfFractBias/security/advisories/new)
-rather than opening a public issue. Private vulnerability reporting is enabled
-for this repository. Include the package version and commit, Python and tool
-versions, a minimal reproduction, and the expected impact when possible. Keep
-sensitive biological data and credentials out of public reports and logs.
+Use **Report a vulnerability** on the LOCUSKIT repository's Security tab if
+private reporting is available. Otherwise, contact a LOCUSKIT maintainer
+privately. Include the package version and commit, Python and tool versions,
+a minimal reproduction, and the expected impact when possible. Keep sensitive
+genomic data and credentials out of public issues and logs.
 
-The base `kffractbias` installation has no third-party runtime dependencies.
+The base LOCUSKIT installation has no third-party runtime dependencies.
 The optional `compare` extra installs JCVI and its scientific dependency tree;
 use `uv sync --locked --extra all` for the reviewed dependency set and keep the
 lock file updated. As reviewed on 2026-08-31, JCVI 1.6.6 pulls `diskcache 5.6.3`

@@ -1,4 +1,4 @@
-# Reproduce the README plots
+# FractBias example plots
 
 Run from the repository root with an active environment that has the `plot`
 extra installed. The [input generator](../../scripts/generate_plot_example.py)
@@ -27,8 +27,8 @@ kffractbias report \
   --output-dir "$work/results" --prefix shared-reference
 ```
 
-The [README](../../README.md#example-plots) shows `retention.plot.png` and
-`shared-reference.raw.png` from `$work/results`. The latter sums copy detection
-in windows that are callable in both queries. The same run also writes
+The [FractBias guide](../../docs/fractbias.md#example-plots) shows
+`retention.plot.png` and `shared-reference.raw.png` from `$work/results`.
+The latter sums copy detection in windows that are callable in both queries. The same run also writes
 normalised plots and a PDF with profiles for every reference chromosome. See the
 [comparison guide](../../docs/comparison.md) for the report settings.

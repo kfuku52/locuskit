@@ -18,8 +18,8 @@ from kffractbias.provenance import capture_source_metadata
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
     version = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
-    (wheel,) = (root / "dist").glob(f"kffractbias-{version}-*.whl")
-    archive = root / "dist" / f"kffractbias-{version}.tar.gz"
+    (wheel,) = (root / "dist").glob(f"locuskit-{version}-*.whl")
+    archive = root / "dist" / f"locuskit-{version}.tar.gz"
     expected_source = capture_source_metadata(root / "src" / "kffractbias")["python_source_sha256"]
     assert expected_source is not None
     environment = {
@@ -50,6 +50,30 @@ def main() -> None:
                 "-I",
                 "-c",
                 "import importlib.util, pathlib, sys, kffractbias; assert pathlib.Path(kffractbias.__file__).is_relative_to(sys.prefix); assert importlib.util.find_spec('matplotlib') is None",
+            ]
+        )
+        run([python, "-I", "-m", "locuskit", "--version"])
+        compat = work / "compat"
+        run(["uv", "build", "--wheel", "--out-dir", str(compat), str(root / "compat/kffractbias")])
+        (compat_wheel,) = compat.glob(f"kffractbias-{version}-*.whl")
+        run(
+            [
+                "uv",
+                "pip",
+                "install",
+                "--python",
+                python,
+                "--no-deps",
+                "--no-index",
+                str(compat_wheel),
+            ]
+        )
+        run(
+            [
+                python,
+                "-I",
+                "-c",
+                "from importlib.metadata import version; assert version('kffractbias') == version('locuskit')",
             ]
         )
         example = work / "example"
@@ -85,6 +109,9 @@ def main() -> None:
             source.extractall(work / "source", filter="data")
         (extracted,) = (work / "source").iterdir()
         for path in (
+            "README.md",
+            "LICENSE",
+            "SECURITY.md",
             "CITATION.cff",
             "CONTRIBUTING.md",
             "CHANGELOG.md",
@@ -92,6 +119,16 @@ def main() -> None:
             "scripts/check.py",
             "scripts/generate_example.py",
             "tests/test_metadata.py",
+            "tests/test_locuskit.py",
+            "compat/kffractbias/pyproject.toml",
+            "docs/neighborhoods.md",
+            "docs/fractbias.md",
+            "docs/assets/locuskit-banner.png",
+            "examples/neighborhoods/alpha.gff3",
+            "examples/neighborhoods/beta.gff3",
+            "examples/neighborhoods/genomes.tsv",
+            "examples/neighborhoods/mapping.tsv",
+            "examples/neighborhoods/groups.tsv",
             "examples/minimal/target.bed",
             "examples/annotations/README.md",
             "docs/README.md",

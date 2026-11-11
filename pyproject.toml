@@ -3,14 +3,15 @@ requires = ["setuptools>=77,<81"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "kffractbias"
-version = "0.2.0.dev10"
-description = "Offline fractionation-bias analysis from precomputed synteny or genome annotations"
+name = "locuskit"
+version = "0.2.0.dev11"
+description = "Genomic neighborhoods, collinearity and fractionation analysis"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
+  { name = "Kenji Fukushima" },
   { name = "Blake L. Joyce" },
   { name = "Asher Haug-Baltzell" },
   { name = "Sean Davey" },
@@ -54,12 +55,13 @@ test = [
 ]
 
 [project.scripts]
+locuskit = "locuskit.cli:main"
 kffractbias = "kffractbias.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/kfuku52/kfFractBias"
-Source = "https://github.com/kfuku52/kfFractBias"
-Documentation = "https://github.com/kfuku52/kfFractBias/blob/master/docs/README.md"
+Repository = "https://github.com/kfuku52/locuskit"
+Issues = "https://github.com/kfuku52/locuskit/issues"
+"kfFractBias predecessor" = "https://github.com/kfuku52/kfFractBias"
 Upstream = "https://github.com/bjoyce3/SynMapFractBiasAnalysis"
 
 [tool.setuptools]
@@ -91,7 +93,7 @@ warn_unused_ignores = true
 
 [tool.coverage.run]
 branch = true
-source = ["src/kffractbias"]
+source = ["src/locuskit", "src/kffractbias"]
 
 [tool.coverage.report]
 fail_under = 80

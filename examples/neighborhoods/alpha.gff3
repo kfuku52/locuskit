@@ -1,0 +1,4 @@
+##gff-version 3
+chr1	synthetic	gene	100	200	.	+	.	ID=alpha_left
+chr1	synthetic	gene	300	400	.	+	.	ID=alpha_focal
+chr1	synthetic	gene	500	600	.	+	.	ID=alpha_right

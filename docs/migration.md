@@ -8,7 +8,7 @@ settings and resolved colour metadata are documented in
 The all-reference PDF still defaults to expected-copy normalisation; select
 `all_profiles_scale: "raw"` for summed percentages.
 
-The current `master` line is a development build identified by a `.dev` version.
+The LOCUSKIT `main` branch uses a `.dev` version for development snapshots.
 Historical 0.1.3 and 0.1.4 were untagged milestones; different commits could
 report the same version while implementing different behavior. The
 [changelog](../CHANGELOG.md) describes those milestones without presenting them

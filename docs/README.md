@@ -1,13 +1,14 @@
 # Documentation
 
-These documents describe the maintained offline `kffractbias` CLI and are
-versioned with its source code. Start with the repository [installation
-instructions](../README.md). When reading an older result, use the documentation
-at the commit that produced it; package versions alone did not distinguish all
-historical untagged snapshots.
+Start with the [installation and neighborhood quick start](../README.md).
+For reproducibility, use the documentation at the commit that produced your
+results. Historical untagged snapshots sometimes shared the same version.
 
 | Task | Reference |
 | --- | --- |
+| Prepare genomic loci or neighborhood tables | [Neighborhood format and CLI guide](neighborhoods.md) |
+| Convert a GeneGalleon tree-plot synteny table | [GeneGalleon interchange](neighborhoods.md#use-existing-genegalleon-output) |
+| Set up and run the FractBias commands | [FractBias user guide](fractbias.md) |
 | Check installation with BED and anchors | [Minimal example](../examples/minimal/README.md) |
 | Run validate, compare, and selfcompare on synthetic CDS/GFF | [Annotation tutorial](../examples/annotations/README.md) |
 | Understand ranks, denominators, windows, quota, and self retention | [Calculation rules](methods.md) |

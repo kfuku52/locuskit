@@ -1,13 +1,13 @@
 # Contributing
 
-Clone the repository as described in the [README](README.md), enter its root,
-and use Python 3.11 or newer with the locked development environment:
+From the LOCUSKIT source checkout, use Python 3.11 or newer with the locked
+development environment.
 
 ```bash
 uv sync --locked --extra test --extra plot
 ```
 
-Before opening a pull request or pushing directly to `master`, run:
+Run the standard checks before submitting changes:
 
 ```bash
 uv run --no-sync python scripts/check.py
@@ -124,22 +124,17 @@ For a version change or release preparation:
    ```bash
    uv lock
    uv sync --locked --extra test --extra all
-   uv run --no-sync kffractbias version
+   uv run --no-sync locuskit --version
    ```
 
 3. Inspect the lockfile diff. With LAST and BLAST+ installed, run
    `uv run --no-sync python scripts/check.py --full --integration`. This checks
    version consistency, builds the selected version, and tests its distributions.
    Run both [worked examples](docs/README.md) when changing user-facing behavior.
-4. Publish the checked commit to `master`. Administrators may push directly;
-   other contributors must use a pull request and satisfy the branch's required
-   checks and review conditions.
-5. For an actual release, wait for CI to pass on that default-branch commit,
-   then tag it as `vX.Y.Z` and describe the supported version and changes in the
-   GitHub release.
-   A version bump or passing check alone does not create a release or publish
-   a package to PyPI. Resume development with a new `.devN` version and repeat
-   the metadata/lockfile synchronization.
+4. Before publishing, confirm the LOCUSKIT repository URL, add the confirmed
+   project links to package metadata, and enable private vulnerability reporting
+   in the destination repository. Check how the README renders on each
+   publication site, including images and documentation links.
 
 The maintained user documentation lives in [docs](docs/README.md). Update it,
 the README, and the examples together when inputs, outputs, or CLI behavior

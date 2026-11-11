@@ -1,6 +1,6 @@
 # Synthetic annotation tutorial
 
-Run from the repository root using the [comparison environment](../../README.md)
+Run from the repository root using the [comparison environment](../../docs/fractbias.md#installation)
 and LAST on PATH. This tutorial generates small artificial nucleotide sequences
 and GFF3 hierarchies; they are test data, not biological genes or a benchmark
 for real genomes. The random sequences are not guaranteed to encode proteins.
@@ -72,4 +72,4 @@ counts are the same. Removing `--no-plot` adds PDF/PNG output.
 Compare/selfcompare refuse to replace an existing synteny work directory unless
 `--force` is given. For a fresh run that preserves prior results, use a new
 prefix. To change only the windows, reuse the BED/anchors with `calculate` as
-shown in the [README](../../README.md), adding `--self` for self anchors.
+shown in the [FractBias guide](../../docs/fractbias.md#outputs), adding `--self` for self anchors.

@@ -1,0 +1,282 @@
+from pathlib import Path
+
+from locuskit.cli import main
+from locuskit.context import COLUMNS, read_context
+from locuskit.tables import write_table
+
+
+def table(path: Path, text: str) -> Path:
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_annotation_to_context_with_aliases_and_missing_data(tmp_path: Path) -> None:
+    table(
+        tmp_path / "a.gff3",
+        "##gff-version 3\n"
+        "01\ta\tgene\t1\t10\t.\t+\t.\tID=left\n"
+        "01\ta\tgene\t21\t30\t.\t-\t.\tID=focal\n"
+        "01\ta\tgene\t41\t50\t.\t.\t.\tID=right\n"
+        "02\ta\tgene\t1\t1\t.\t+\t.\tID=isolated\n",
+    )
+    manifest = table(tmp_path / "genomes.tsv", "species_id\tassembly_id\tgff\nspA\tA1\ta.gff3\n")
+    aliases = table(tmp_path / "alias.tsv", "species_id\tlocus_id\tgene_id\nspA\tfocal\ttx1\n")
+    loci = tmp_path / "loci.tsv.gz"
+    assert (
+        main(
+            [
+                "loci",
+                "--manifest_tsv",
+                str(manifest),
+                "--aliases_tsv",
+                str(aliases),
+                "--out_file",
+                str(loci),
+            ]
+        )
+        == 0
+    )
+    mapping = table(
+        tmp_path / "mapping.tsv",
+        "gene\tspecies\ntx1\tspA\nright\tspA\nmissing\tspA\nnot_annotated\tspB\nisolated\tspA\n",
+    )
+    groups = table(tmp_path / "groups.tsv", "species_id\tgene_id\tgroup_id\nspA\tright\tfamily1\n")
+    command = [
+        "neighbors",
+        "--focal_tsv",
+        str(mapping),
+        "--loci_tsv",
+        str(loci),
+        "--groups_tsv",
+        str(groups),
+        "--window",
+        "2",
+        "--out_file",
+    ]
+    output, second = tmp_path / "context.tsv.gz", tmp_path / "another.tsv.gz"
+    assert main([*command, str(output)]) == 0
+    assert main([*command, str(second)]) == 0
+    assert output.read_bytes() == second.read_bytes()
+    rows = read_context(output)
+    focal = {r.focal_id: r for r in rows if r.record_type == "focal"}
+    assert (focal["tx1"].seqid, focal["tx1"].start, focal["tx1"].end) == ("01", 21, 30)
+    assert (focal["tx1"].observed_upstream, focal["tx1"].observed_downstream) == (1, 1)
+    assert (focal["isolated"].observed_upstream, focal["isolated"].observed_downstream) == (0, 0)
+    assert focal["missing"].status == "locus_missing"
+    assert focal["not_annotated"].status == "annotation_missing"
+    assert focal["right"].status == "orientation_unknown"
+    assert [(r.offset, r.neighbor_id, r.group_id) for r in rows if r.record_type == "neighbor"] == [
+        (-1, "right", "family1"),
+        (1, "left", ""),
+    ]
+    assert main(["validate", "--in_file", str(output), "--focal_tsv", str(mapping)]) == 0
+
+
+def test_precomputed_hits_record_singletons_and_unsearched_genes(tmp_path: Path) -> None:
+    loci = table(
+        tmp_path / "loci.tsv",
+        "species_id\tassembly_id\tgene_id\tseqid\tstart\tend\tstrand\n"
+        "A\ta\ta1\tchr\t1\t3\t+\nA\ta\ta2\tchr\t4\t6\t+\nA\ta\ta3\tchr\t7\t9\t+\n"
+        "B\tb\tb1\tchr\t1\t3\t+\nB\tb\tb2\tchr\t4\t6\t+\nB\tb\tb3\tchr\t7\t9\t+\n"
+        "B\tb\tb4\tchr\t10\t12\t+\n",
+    )
+    mapping = table(tmp_path / "mapping.tsv", "gene\tspecies\na2\tA\nb2\tB\n")
+    hits = table(
+        tmp_path / "hits.tsv",
+        "a1\tb1\t1e-30\nb1\tb3\t1e-20\na3\ta3\t0\nb3\ta3\t0.02\nb1\toutside\t1e-30\n",
+    )
+    output = tmp_path / "ctx.tsv"
+    assert (
+        main(
+            [
+                "neighbors",
+                "--focal_tsv",
+                str(mapping),
+                "--loci_tsv",
+                str(loci),
+                "--hits_tsv",
+                str(hits),
+                "--out_file",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    neighbors = {r.neighbor_id: r for r in read_context(output) if r.record_type == "neighbor"}
+    assert {g: (r.group_id, r.group_size) for g, r in neighbors.items()} == {
+        "a1": ("SG000001", 3),
+        "b1": ("SG000001", 3),
+        "b3": ("SG000001", 3),
+        "a3": ("SG000002", 1),
+        "b4": ("", None),
+    }
+    assert all(
+        r.group_method == "similarity_hits" and r.evalue_cutoff == 0.01 for r in neighbors.values()
+    )
+
+
+def test_legacy_round_trip_and_missing_focal(tmp_path: Path) -> None:
+    content = (
+        "node_name\tspecies\tdirection\toffset\tneighbor_gene\tgroup_id\tgroup_size\tevalue_cutoff\n"
+        "leaf\tsp\tdownstream\t1\tNA\tSG000001\t2\t1e-05\n"
+        "leaf\tsp\tupstream\t-2\tleft\tSG000001\t2\t1e-05\n"
+    )
+    original = table(tmp_path / "legacy.tsv", content)
+    mapping = table(tmp_path / "mapping.tsv", "gene\tspecies\nleaf\tsp\nmissing\tother\n")
+    canonical, projected = tmp_path / "context.tsv", tmp_path / "projected.tsv"
+    assert (
+        main(
+            [
+                "import-legacy",
+                "--in_file",
+                str(original),
+                "--focal_tsv",
+                str(mapping),
+                "--out_file",
+                str(canonical),
+            ]
+        )
+        == 0
+    )
+    rows = read_context(canonical)
+    assert len(rows) == 4
+    assert all(r.status == "legacy_unknown" and r.observed_upstream is None for r in rows[:2])
+    assert main(["export-legacy", "--in_file", str(canonical), "--out_file", str(projected)]) == 0
+    assert projected.read_text() == content
+
+
+def test_reject_conflicting_legacy_and_preserve_destination(tmp_path: Path) -> None:
+    path = table(
+        tmp_path / "bad.tsv",
+        "node_name\tspecies\toffset\tneighbor_gene\tgroup_id\n"
+        "a\tsp\t1\tx\tgroup1\na\tsp\t1\ty\tgroup2\n",
+    )
+    destination = table(tmp_path / "output.tsv", "original\n")
+    assert main(["import-legacy", "--in_file", str(path), "--out_file", str(destination)]) == 2
+    assert destination.read_text() == "original\n"
+
+
+def test_reject_impossible_observed_coverage_and_in_place_write(tmp_path: Path) -> None:
+    output = tmp_path / "context.tsv"
+    record = {
+        "schema_version": "1",
+        "record_type": "focal",
+        "focal_id": "a",
+        "species_id": "sp",
+        "assembly_id": "as",
+        "seqid": "contig",
+        "start": 1,
+        "end": 1,
+        "strand": "+",
+        "status": "observed",
+        "window": 10**12,
+        "observed_upstream": 0,
+        "observed_downstream": 10**12,
+    }
+    write_table(output, COLUMNS, [[record.get(field, "") for field in COLUMNS]], [])
+    assert main(["validate", "--in_file", str(output)]) == 2
+    legacy = table(
+        tmp_path / "legacy.tsv",
+        "node_name\tspecies\toffset\tneighbor_gene\tgroup_id\na\tsp\t1\tx\tgrp\n",
+    )
+    assert main(["import-legacy", "--in_file", str(legacy), "--out_file", str(legacy)]) == 2
+    assert legacy.read_text().endswith("a\tsp\t1\tx\tgrp\n")
+
+
+def test_legacy_dispatch_and_program_label(capsys) -> None:
+    assert main(["fractbias", "version"]) == 0
+    assert capsys.readouterr().out.startswith("kfFractBias ")
+
+
+def test_diamond_uses_only_requested_proteins_and_keeps_missing_neighbors(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import subprocess
+
+    from locuskit.neighbors import groups_from_proteins
+
+    protein = table(tmp_path / "seq.fa", ">A other words\nMAGG\n>B\nMAGG\n>unused\nMAAS\n")
+    calls = []
+
+    def diamond(command, *, capture_output, text, check):
+        calls.append(command[1])
+        if command[1] == "makedb":
+            subset = Path(command[command.index("--in") + 1])
+            assert subset.read_text() == ">A\nMAGG\n>B\nMAGG\n"
+        else:
+            assert command[command.index("--threads") + 1] == "2"
+            table(Path(command[command.index("--out") + 1]), "A\tB\t0.001\n")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", diamond)
+    assert groups_from_proteins(protein, {("x", "A"), ("y", "B"), ("x", "missing")}, 0.01, 2) == {
+        ("x", "A"): ("SG000001", 2),
+        ("y", "B"): ("SG000001", 2),
+    }
+    assert calls == ["makedb", "blastp"]
+
+
+def test_context_checks_genomic_direction_and_locus_identity(tmp_path: Path, capsys) -> None:
+    focal = {
+        "schema_version": "1",
+        "record_type": "focal",
+        "focal_id": "a",
+        "species_id": "sp",
+        "assembly_id": "as",
+        "seqid": "ctg",
+        "start": 10,
+        "end": 15,
+        "strand": "+",
+        "status": "observed",
+        "window": 1,
+        "observed_upstream": 0,
+        "observed_downstream": 1,
+    }
+    neighbor = {
+        "schema_version": "1",
+        "record_type": "neighbor",
+        "focal_id": "a",
+        "species_id": "sp",
+        "assembly_id": "as",
+        "seqid": "ctg",
+        "start": 2,
+        "end": 5,
+        "strand": "+",
+        "offset": 1,
+        "neighbor_id": "b",
+    }
+    output = tmp_path / "bad.tsv"
+
+    def validate(*rows):
+        write_table(
+            output, COLUMNS, [[row.get(field, "") for field in COLUMNS] for row in rows], []
+        )
+        return main(["validate", "--in_file", str(output)])
+
+    assert validate(focal, neighbor) == 2
+    assert "offsets contradict" in capsys.readouterr().err
+    other = dict(focal, focal_id="b", start=21, end=25, observed_downstream=0)
+    assert validate(focal, dict(neighbor, start=20, end=25), other) == 2
+    assert "Conflicting coordinates" in capsys.readouterr().err
+
+
+def test_cli_reports_truncated_gzip(tmp_path: Path, capsys) -> None:
+    import gzip
+
+    output = tmp_path / "truncated.tsv.gz"
+    output.write_bytes(gzip.compress(("\t".join(COLUMNS) + "\n").encode())[:-4])
+    assert main(["validate", "--in_file", str(output)]) == 2
+    assert capsys.readouterr().err.startswith("locuskit:")
+
+
+def test_loci_rejects_multi_id_gene_and_preserves_existing_output(tmp_path: Path, capsys) -> None:
+    table(tmp_path / "one.gff", "chr\t.\tgene\t1\t2\t.\t+\t.\tID=gene1\n")
+    table(tmp_path / "two.gff", "chr\t.\tgene\t5\t7\t.\t+\t.\tID=gene2,gene3\n")
+    manifest = table(
+        tmp_path / "genomes.tsv",
+        "species_id\tassembly_id\tgff\nA\tx\tone.gff\nB\ty\ttwo.gff\n",
+    )
+    output = table(tmp_path / "loci.tsv", "prior output\n")
+    assert main(["loci", "--manifest_tsv", str(manifest), "--out_file", str(output)]) == 2
+    assert "multiple gene loci" in capsys.readouterr().err
+    assert output.read_text() == "prior output\n"

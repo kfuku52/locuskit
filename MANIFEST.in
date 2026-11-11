@@ -1,6 +1,9 @@
 include CITATION.cff CHANGELOG.md CONTRIBUTING.md SECURITY.md uv.lock
 recursive-include docs *.md
+include docs/assets/locuskit-banner.png
 recursive-include examples *.md *.bed *.anchors
 include examples/plots/*.png
+recursive-include examples/neighborhoods *.gff3 *.tsv
 recursive-include scripts *.py
 recursive-include tests *.py
+recursive-include compat *.toml

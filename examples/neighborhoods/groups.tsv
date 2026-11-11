@@ -1,0 +1,5 @@
+species_id	gene_id	group_id
+alpha	alpha_left	group1
+beta	beta_right	group1
+alpha	alpha_right	group2
+beta	beta_left	group2

@@ -1,44 +1,35 @@
 cff-version: 1.2.0
 message: >-
-  Please cite the original FractBias publication when using kfFractBias.
-title: kfFractBias
+  Cite LOCUSKIT as software. If you use its FractBias commands, also cite the
+  original FractBias paper listed below.
+title: LOCUSKIT
 type: software
 authors:
-  - family-names: Joyce
-    given-names: Blake L.
-  - family-names: Haug-Baltzell
-    given-names: Asher
-  - family-names: Davey
-    given-names: Sean
-  - family-names: Bomhoff
-    given-names: Matthew
-  - family-names: Schnable
-    given-names: James C.
-  - family-names: Lyons
-    given-names: Eric
-version: 0.2.0.dev10
+  - family-names: Fukushima
+    given-names: Kenji
+version: 0.2.0.dev11
 license: MIT
-repository-code: https://github.com/kfuku52/kfFractBias
-preferred-citation:
-  type: article
-  title: "FractBias: a graphical tool for assessing fractionation bias following polyploidy"
-  authors:
-    - family-names: Joyce
-      given-names: Blake L.
-    - family-names: Haug-Baltzell
-      given-names: Asher
-    - family-names: Davey
-      given-names: Sean
-    - family-names: Bomhoff
-      given-names: Matthew
-    - family-names: Schnable
-      given-names: James C.
-    - family-names: Lyons
-      given-names: Eric
-  journal: Bioinformatics
-  volume: 33
-  issue: 4
-  start: 552
-  end: 554
-  year: 2017
-  doi: 10.1093/bioinformatics/btw666
+repository-code: https://github.com/kfuku52/locuskit
+references:
+  - type: article
+    title: "FractBias: a graphical tool for assessing fractionation bias following polyploidy"
+    authors:
+      - family-names: Joyce
+        given-names: Blake L.
+      - family-names: Haug-Baltzell
+        given-names: Asher
+      - family-names: Davey
+        given-names: Sean
+      - family-names: Bomhoff
+        given-names: Matthew
+      - family-names: Schnable
+        given-names: James C.
+      - family-names: Lyons
+        given-names: Eric
+    journal: Bioinformatics
+    volume: 33
+    issue: 4
+    start: 552
+    end: 554
+    year: 2017
+    doi: 10.1093/bioinformatics/btw666

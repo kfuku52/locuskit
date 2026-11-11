@@ -7,6 +7,12 @@ untagged development milestones, not published release artifacts. See the
 
 ## Unreleased
 
+- Introduce the LOCUSKIT distribution and CLI for strand-aware genomic
+  neighborhoods and GeneGalleon tree-plot TSV conversion. Keep the
+  `kffractbias` command and Python package available.
+- Add a synthetic neighborhood quick start, a README banner, and separate
+  citation entries for LOCUSKIT and the original FractBias publication.
+
 - Add stable input-wide series colours without ten-colour cycling, optional
   pastel palettes and per-analysis overrides, total colour/opacity settings,
   graphical legends, and raw or normalised all-reference pages. Record resolved
