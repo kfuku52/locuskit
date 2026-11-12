@@ -58,7 +58,7 @@ def read_table(
                 continue
             if len(row) != len(header):
                 raise ValueError(f"{path}:{line}: expected {len(header)} columns, got {len(row)}")
-            if any(_CONTROL.search(value) for value in row):
+            if _CONTROL.search(" ".join(row)):
                 raise ValueError(f"{path}:{line}: control character in TSV field")
             yield dict(zip(header, row, strict=True))
 
