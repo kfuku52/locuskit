@@ -62,6 +62,7 @@ def parser() -> argparse.ArgumentParser:
     batch.add_argument(
         "--manifest_tsv", required=True, type=Path, help="Table with focal_tsv and out_file columns"
     )
+    batch.add_argument("--jobs", type=int, default=1, help="Concurrent family searches (default 1)")
     _neighborhood_options(batch)
 
     validate = commands.add_parser("validate", help="Check a versioned family neighborhood table")
@@ -116,7 +117,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.command == "neighbors":
                 build_context(args.focal_tsv, args.loci_tsv, args.out_file, *options)
             else:
-                build_batch(args.manifest_tsv, args.loci_tsv, *options)
+                build_batch(args.manifest_tsv, args.loci_tsv, *options, jobs=args.jobs)
         elif args.command == "validate":
             mapping = read_focals(args.focal_tsv) if args.focal_tsv else None
             rows = read_context(args.in_file, mapping)

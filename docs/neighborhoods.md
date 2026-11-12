@@ -52,6 +52,9 @@ temporary FASTA containing only proteins found in the requested windows.
 LOCUSKIT rejects overlapping input and output paths and repeated
 outputs before writing. Each output is replaced atomically. If a later job
 fails, earlier completed tables remain available.
+Use `--jobs 2 --threads 1` to run up to two family searches at once.
+`--threads` applies to each DIAMOND search. The default processes one family
+at a time. Parallel results are written in manifest order.
 
 The focal mapping uses gene and species as in aioi. The locus table has
 species_id, assembly_id, gene_id, seqid, start, end and strand. Existing

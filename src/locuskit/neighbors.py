@@ -5,8 +5,11 @@ from __future__ import annotations
 import subprocess
 import tempfile
 from collections import Counter, defaultdict
+from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import nullcontext
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 
 from .context import ContextRow, positioned, write_context
@@ -322,8 +325,12 @@ def build_batch(
     cutoff: float | None = None,
     proteins: Path | None = None,
     threads: int = 1,
+    *,
+    jobs: int = 1,
 ) -> None:
     """Write independent neighborhood tables using one shared locus read."""
+    if jobs < 1:
+        raise ValueError("jobs must be positive")
     sources = _homology_inputs(groups, hits, cutoff, proteins, threads)
     tasks: list[tuple[Path, Path]] = []
     for row in read_table(manifest, ("focal_tsv", "out_file")):
@@ -356,16 +363,28 @@ def build_batch(
                 pass
             else:
                 selected = shared_proteins
-        for (focal_path, output), mapping in zip(tasks, mappings, strict=True):
-            rows = _family_context(
-                mapping,
-                loci,
-                window,
-                groups,
-                hits,
-                cutoff,
-                proteins,
-                threads,
-                search_proteins=selected,
-            )
-            write_context(output, rows, [focal_path, *shared])
+        compute = partial(
+            _family_context,
+            loci=loci,
+            window=window,
+            groups=groups,
+            hits=hits,
+            cutoff=cutoff,
+            proteins=proteins,
+            threads=threads,
+            search_proteins=selected,
+        )
+
+        def write_results(
+            destinations: list[tuple[Path, Path]], results: Iterable[list[ContextRow]]
+        ) -> None:
+            for (focal_path, output), rows in zip(destinations, results, strict=True):
+                write_context(output, rows, [focal_path, *shared])
+
+        if jobs == 1 or len(tasks) == 1:
+            write_results(tasks, map(compute, mappings))
+        else:
+            with ThreadPoolExecutor(max_workers=min(jobs, len(tasks))) as pool:
+                for first in range(0, len(tasks), jobs):
+                    stop = first + jobs
+                    write_results(tasks[first:stop], pool.map(compute, mappings[first:stop]))

@@ -74,8 +74,9 @@ def test_neighborhood_batch_matches_single_family_tables(tmp_path: Path) -> None
 
 
 @pytest.mark.parametrize("bad_later_sequence", [False, True])
+@pytest.mark.parametrize("jobs", [1, 2])
 def test_neighborhood_batch_keeps_protein_searches_local(
-    tmp_path: Path, monkeypatch, bad_later_sequence: bool
+    tmp_path: Path, monkeypatch, bad_later_sequence: bool, jobs: int
 ) -> None:
     loci = table(
         tmp_path / "loci.tsv",
@@ -85,7 +86,10 @@ def test_neighborhood_batch_keeps_protein_searches_local(
     )
     table(tmp_path / "fa.tsv", "gene\tspecies\na2\tA\n")
     table(tmp_path / "fb.tsv", "gene\tspecies\nb2\tB\n")
-    manifest = table(tmp_path / "jobs.tsv", "focal_tsv\tout_file\nfa.tsv\ta.tsv\nfb.tsv\tb.tsv\n")
+    table(tmp_path / "fc.tsv", "gene\tspecies\nunknown\tA\n")
+    manifest = table(
+        tmp_path / "jobs.tsv", "focal_tsv\tout_file\nfa.tsv\ta.tsv\nfb.tsv\tb.tsv\nfc.tsv\tc.tsv\n"
+    )
     proteins = tmp_path / "proteins.faa.gz"
     with gzip.open(proteins, "wt") as stream:
         second_sequence = "bad-1" if bad_later_sequence else "MAGG"
@@ -114,17 +118,21 @@ def test_neighborhood_batch_keeps_protein_searches_local(
             str(proteins),
             "--window",
             "1",
+            "--jobs",
+            str(jobs),
         ]
     )
     assert (tmp_path / "a.tsv").is_file()
     if bad_later_sequence:
         assert status != 0
         assert not (tmp_path / "b.tsv").exists()
+        assert not (tmp_path / "c.tsv").exists()
         assert makedb == [">a3\nMAAS\n>a1\nMAAS\n"]
     else:
         assert status == 0
         assert (tmp_path / "b.tsv").is_file()
-        assert makedb == [">a3\nMAAS\n>a1\nMAAS\n", ">b3\nMAG\nG\n>b1\nMAGG\n"]
+        assert (tmp_path / "c.tsv").is_file()
+        assert sorted(makedb) == [">a3\nMAAS\n>a1\nMAAS\n", ">b3\nMAG\nG\n>b1\nMAGG\n"]
 
 
 @pytest.mark.parametrize(
