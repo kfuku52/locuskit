@@ -49,6 +49,8 @@ The manifest command reads the locus table once and uses the same neighborhood
 and homology options as `neighbors`. Each family uses its own set of proteins
 for DIAMOND. With a shared FASTA, the batch first streams the proteome into a
 temporary FASTA containing only proteins found in the requested windows.
+With `--hits_tsv`, the batch validates the shared hit file once and builds a
+temporary index. Each family forms groups using its own neighbors.
 LOCUSKIT rejects overlapping input and output paths and repeated
 outputs before writing. Each output is replaced atomically. If a later job
 fails, earlier completed tables remain available.

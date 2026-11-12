@@ -13,12 +13,11 @@ from functools import partial
 from pathlib import Path
 
 from .context import ContextRow, positioned, write_context
+from .hits import GeneKey, GroupMap, groups_from_index, index_hits
+from .hits import groups_from_hits as groups_from_hits
 from .loci import Locus, read_focals, read_loci
 from .proteins import select_proteins as select_proteins
-from .tables import evalue, identifier, open_text, read_table
-
-GeneKey = tuple[str, str]
-GroupMap = dict[GeneKey, tuple[str, int]]
+from .tables import identifier, read_table
 
 
 def extract(focals: dict[str, str], loci: list[Locus], window: int) -> list[ContextRow]:
@@ -81,57 +80,6 @@ def read_groups(path: Path) -> GroupMap:
         assignments[key] = identifier(row["group_id"], "group_id")
     counts = Counter(assignments.values())
     return {key: (group, counts[group]) for key, group in assignments.items()}
-
-
-def groups_from_hits(
-    path: Path, neighbors: set[GeneKey], cutoff: float, *, searched: set[str] | None = None
-) -> GroupMap:
-    """Cluster observed neighbors using headerless DIAMOND qseqid/sseqid/evalue."""
-    by_id: dict[str, GeneKey] = {}
-    for key in sorted(neighbors):
-        gene = key[1]
-        if gene in by_id:
-            raise ValueError(f"{path}: hit format needs unique sequence IDs, repeated {gene!r}")
-        by_id[gene] = key
-    parent = {gene: gene for gene in (searched or ())}
-
-    def root(gene: str) -> str:
-        while parent[gene] != gene:
-            parent[gene] = parent[parent[gene]]
-            gene = parent[gene]
-        return gene
-
-    with open_text(path) as stream:
-        for line_number, line in enumerate(stream, 1):
-            if not line.strip():
-                continue
-            fields = line.rstrip("\r\n").split("\t")
-            if len(fields) != 3:
-                raise ValueError(f"{path}:{line_number}: expected qseqid, sseqid and evalue")
-            a, b, value = fields
-            identifier(a, "qseqid")
-            identifier(b, "sseqid")
-            score = evalue(value, "hit evalue")
-            if searched is not None and (a not in searched or b not in searched):
-                raise ValueError(
-                    f"{path}:{line_number}: DIAMOND returned an unexpected sequence ID"
-                )
-            for endpoint in (a, b):
-                if endpoint in by_id and searched is None:
-                    parent.setdefault(endpoint, endpoint)
-            if score <= cutoff and a in parent and b in parent:
-                aa, bb = sorted((root(a), root(b)))
-                if aa != bb:
-                    parent[bb] = aa
-    components: dict[str, list[str]] = defaultdict(list)
-    for gene in sorted(parent):
-        components[root(gene)].append(gene)
-    ordered = sorted(components.values(), key=lambda genes: (-len(genes), genes[0]))
-    return {
-        by_id[gene]: (f"SG{index:06d}", len(genes))
-        for index, genes in enumerate(ordered, 1)
-        for gene in genes
-    }
 
 
 def groups_from_proteins(
@@ -236,6 +184,7 @@ def _family_context(
     threads: int,
     *,
     search_proteins: Path | None = None,
+    hit_index: Path | None = None,
 ) -> list[ContextRow]:
     rows = extract(focals, loci, window)
     assignments: GroupMap = {}
@@ -255,7 +204,10 @@ def _family_context(
                 f"{hits or proteins}: repeated sequence ID across species: {conflicts[0]!r}"
             )
         if hits is not None:
-            assignments = groups_from_hits(hits, keys, cutoff)
+            if hit_index is None:
+                assignments = groups_from_hits(hits, keys, cutoff)
+            else:
+                assignments = groups_from_index(hit_index, hits, keys)
             method = "similarity_hits"
         else:
             assert proteins is not None
@@ -296,9 +248,7 @@ def _check_batch_outputs(outputs: list[Path], inputs: list[Path]) -> None:
             raise ValueError(f"Neighborhood output would also be a directory: {output}")
 
 
-def _batch_proteins(
-    mappings: list[dict[str, str]], loci: list[Locus], window: int, source: Path, output: Path
-) -> None:
+def _batch_neighbor_ids(mappings: list[dict[str, str]], loci: list[Locus], window: int) -> set[str]:
     focals: dict[str, dict[str, str]] = defaultdict(dict)
     for mapping in mappings:
         for gene, species in mapping.items():
@@ -307,13 +257,12 @@ def _batch_proteins(
     for locus in loci:
         if locus.species_id in focals:
             by_species[locus.species_id].append(locus)
-    wanted = {
+    return {
         row.neighbor_id
         for species, mapping in focals.items()
         for row in extract(mapping, by_species[species], window)
         if row.record_type == "neighbor"
     }
-    select_proteins(source, output, wanted)
 
 
 def build_batch(
@@ -348,21 +297,27 @@ def build_batch(
     loci = read_loci(locus_path, species)
     workspace = (
         tempfile.TemporaryDirectory(prefix="locuskit-batch-")
-        if proteins is not None and len(tasks) > 1
+        if (proteins is not None or hits is not None) and len(tasks) > 1
         else nullcontext()
     )
     with workspace as temp:
         selected = None
+        hit_index = None
         if temp is not None:
-            assert proteins is not None
-            shared_proteins = Path(temp) / "selected.faa"
-            try:
-                _batch_proteins(mappings, loci, window, proteins, shared_proteins)
-            except ValueError:
-                # Report malformed input at its original family, after earlier outputs.
-                pass
+            wanted = _batch_neighbor_ids(mappings, loci, window)
+            if hits is not None:
+                hit_index = Path(temp) / "hits.sqlite"
+                index_hits(hits, hit_index, wanted, 0.01 if cutoff is None else cutoff)
             else:
-                selected = shared_proteins
+                assert proteins is not None
+                shared_proteins = Path(temp) / "selected.faa"
+                try:
+                    select_proteins(proteins, shared_proteins, wanted)
+                except ValueError:
+                    # Report malformed input at its original family, after earlier outputs.
+                    pass
+                else:
+                    selected = shared_proteins
         compute = partial(
             _family_context,
             loci=loci,
@@ -373,6 +328,7 @@ def build_batch(
             proteins=proteins,
             threads=threads,
             search_proteins=selected,
+            hit_index=hit_index,
         )
 
         def write_results(

@@ -73,6 +73,38 @@ def test_neighborhood_batch_matches_single_family_tables(tmp_path: Path) -> None
         assert single.read_bytes() == (tmp_path / "result" / name).read_bytes()
 
 
+def test_batch_hits_preserves_family_groups_and_singletons(tmp_path: Path) -> None:
+    loci = table(
+        tmp_path / "loci.tsv",
+        "species_id\tassembly_id\tgene_id\tseqid\tstart\tend\tstrand\n"
+        "A\ta\ta1\tchr\t1\t3\t+\nA\ta\ta2\tchr\t4\t6\t+\n"
+        "A\ta\ta3\tchr\t7\t9\t+\nA\ta\ta4\tchr\t10\t12\t+\n",
+    )
+    first = table(tmp_path / "first.tsv", "gene\tspecies\na2\tA\n")
+    second = table(tmp_path / "second.tsv", "gene\tspecies\na3\tA\n")
+    manifest = table(
+        tmp_path / "jobs.tsv",
+        "focal_tsv\tout_file\nfirst.tsv\tfirst-out.tsv\nsecond.tsv\tsecond-out.tsv\n",
+    )
+    hits = tmp_path / "hits.tsv.gz"
+    with gzip.open(hits, "wt") as stream:
+        stream.write("a1\ta3\t0.001\na3\ta1\t0.001\na2\toutside\t0.5\n")
+    options = ["--loci_tsv", str(loci), "--hits_tsv", str(hits), "--window", "1"]
+    assert main(["neighbors-batch", "--manifest_tsv", str(manifest), "--jobs", "2", *options]) == 0
+    for focal in (first, second):
+        single = tmp_path / f"{focal.stem}-single.tsv"
+        assert (
+            main(["neighbors", "--focal_tsv", str(focal), "--out_file", str(single), *options]) == 0
+        )
+        assert single.read_bytes() == (tmp_path / f"{focal.stem}-out.tsv").read_bytes()
+    groups = {
+        row.neighbor_id: row.group_size
+        for row in read_context(tmp_path / "second-out.tsv")
+        if row.record_type == "neighbor"
+    }
+    assert groups == {"a2": 1, "a4": None}
+
+
 @pytest.mark.parametrize("bad_later_sequence", [False, True])
 @pytest.mark.parametrize("jobs", [1, 2])
 def test_neighborhood_batch_keeps_protein_searches_local(
