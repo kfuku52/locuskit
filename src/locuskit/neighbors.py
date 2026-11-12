@@ -198,6 +198,7 @@ def _family_context(
     proteins: Path | None,
     threads: int,
     *,
+    shared_groups: GroupMap | None = None,
     search_proteins: Path | None = None,
     hit_index: Path | None = None,
     require_protein_match: bool = False,
@@ -206,7 +207,7 @@ def _family_context(
     assignments: GroupMap = {}
     method = ""
     if groups is not None:
-        assignments = read_groups(groups)
+        assignments = read_groups(groups) if shared_groups is None else shared_groups
         method = "provided_groups"
     elif hits is not None or proteins is not None:
         if cutoff is None:
@@ -317,6 +318,9 @@ def build_batch(
     if hits is None and proteins is None:
         species = {taxon for mapping in mappings for taxon in mapping.values()}
     loci = read_loci(locus_path, species)
+    shared_groups = (
+        read_groups(groups) if groups is not None and len(tasks) > 1 and window > 0 else None
+    )
     workspace = (
         tempfile.TemporaryDirectory(prefix="locuskit-batch-")
         if (proteins is not None or hits is not None) and len(tasks) > 1
@@ -349,6 +353,7 @@ def build_batch(
             cutoff=cutoff,
             proteins=proteins,
             threads=threads,
+            shared_groups=shared_groups,
             search_proteins=selected,
             hit_index=hit_index,
             require_protein_match=require_protein_match,

@@ -49,7 +49,8 @@ def test_map_proteins_selects_exact_ids_and_preserves_output_on_error(
         assert output.read_bytes() == previous
 
 
-def test_neighborhood_batch_matches_single_family_tables(tmp_path: Path) -> None:
+@pytest.mark.parametrize("group_rows", ["", "A\ta1\tgrp\nD\toutside\tgrp\n"])
+def test_neighborhood_batch_matches_single_family_tables(tmp_path: Path, group_rows: str) -> None:
     loci = table(
         tmp_path / "loci.tsv",
         "species_id\tassembly_id\tgene_id\tseqid\tstart\tend\tstrand\n"
@@ -61,9 +62,12 @@ def test_neighborhood_batch_matches_single_family_tables(tmp_path: Path) -> None
     )
     table(tmp_path / "f1.tsv", "gene\tspecies\na2\tA\nmissing\tB\n")
     table(tmp_path / "f2.tsv", "gene\tspecies\nb1\tB\nother\tC\n")
-    groups = table(tmp_path / "groups.tsv", "species_id\tgene_id\tgroup_id\nA\ta1\tgrp\n")
+    groups = tmp_path / "groups.tsv.gz"
+    with gzip.open(groups, "wt") as stream:
+        stream.write("species_id\tgene_id\tgroup_id\n" + group_rows)
     common = ["--loci_tsv", str(loci), "--groups_tsv", str(groups), "--window", "1"]
-    assert main(["neighbors-batch", "--manifest_tsv", str(manifest), *common]) == 0
+    batch = ["neighbors-batch", "--manifest_tsv", str(manifest), "--jobs", "2", *common]
+    assert main(batch) == 0
     for index, name in enumerate(("one.tsv.gz", "two.tsv"), 1):
         single = tmp_path / name
         focal = tmp_path / f"f{index}.tsv"
@@ -71,6 +75,17 @@ def test_neighborhood_batch_matches_single_family_tables(tmp_path: Path) -> None
             main(["neighbors", "--focal_tsv", str(focal), "--out_file", str(single), *common]) == 0
         )
         assert single.read_bytes() == (tmp_path / "result" / name).read_bytes()
+
+    first = tmp_path / "result" / "one.tsv.gz"
+    (neighbor,) = (row for row in read_context(first) if row.record_type == "neighbor")
+    assert neighbor.group_size == (2 if group_rows else None)
+    assert neighbor.group_method == "provided_groups"
+
+    previous = first.read_bytes()
+    with gzip.open(groups, "wt") as stream:
+        stream.write("species_id\tgene_id\tgroup_id\nA\ta1\tgrp\nA\ta1\tother\n")
+    assert main(batch) == 2
+    assert first.read_bytes() == previous
 
 
 def test_batch_hits_preserves_family_groups_and_singletons(tmp_path: Path) -> None:
