@@ -1,3 +1,5 @@
+import gzip
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -34,6 +36,60 @@ def test_neighborhood_batch_matches_single_family_tables(tmp_path: Path) -> None
             main(["neighbors", "--focal_tsv", str(focal), "--out_file", str(single), *common]) == 0
         )
         assert single.read_bytes() == (tmp_path / "result" / name).read_bytes()
+
+
+@pytest.mark.parametrize("bad_later_sequence", [False, True])
+def test_neighborhood_batch_keeps_protein_searches_local(
+    tmp_path: Path, monkeypatch, bad_later_sequence: bool
+) -> None:
+    loci = table(
+        tmp_path / "loci.tsv",
+        "species_id\tassembly_id\tgene_id\tseqid\tstart\tend\tstrand\n"
+        "A\ta\ta1\tchr\t1\t3\t+\nA\ta\ta2\tchr\t4\t6\t+\nA\ta\ta3\tchr\t7\t9\t+\n"
+        "B\tb\tb1\tchr\t1\t3\t+\nB\tb\tb2\tchr\t4\t6\t-\nB\tb\tb3\tchr\t7\t9\t+\n",
+    )
+    table(tmp_path / "fa.tsv", "gene\tspecies\na2\tA\n")
+    table(tmp_path / "fb.tsv", "gene\tspecies\nb2\tB\n")
+    manifest = table(tmp_path / "jobs.tsv", "focal_tsv\tout_file\nfa.tsv\ta.tsv\nfb.tsv\tb.tsv\n")
+    proteins = tmp_path / "proteins.faa.gz"
+    with gzip.open(proteins, "wt") as stream:
+        second_sequence = "bad-1" if bad_later_sequence else "MAGG"
+        stream.write(
+            f">b3 description\nMAG\nG\n>a3\nMAAS\n>unused\nMR\n>b1\n{second_sequence}\n>a1\nMAAS\n"
+        )
+
+    makedb = []
+
+    def diamond(command, *, capture_output, text, check):
+        if command[1] == "makedb":
+            makedb.append(Path(command[command.index("--in") + 1]).read_text())
+        else:
+            Path(command[command.index("--out") + 1]).touch()
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", diamond)
+    status = main(
+        [
+            "neighbors-batch",
+            "--manifest_tsv",
+            str(manifest),
+            "--loci_tsv",
+            str(loci),
+            "--protein_fasta",
+            str(proteins),
+            "--window",
+            "1",
+        ]
+    )
+    assert (tmp_path / "a.tsv").is_file()
+    if bad_later_sequence:
+        assert status != 0
+        assert not (tmp_path / "b.tsv").exists()
+        assert makedb == [">a3\nMAAS\n>a1\nMAAS\n"]
+    else:
+        assert status == 0
+        assert (tmp_path / "b.tsv").is_file()
+        assert makedb == [">a3\nMAAS\n>a1\nMAAS\n", ">b3\nMAG\nG\n>b1\nMAGG\n"]
 
 
 @pytest.mark.parametrize(
@@ -251,8 +307,6 @@ def test_legacy_dispatch_and_program_label(capsys) -> None:
 def test_diamond_uses_only_requested_proteins_and_keeps_missing_neighbors(
     tmp_path: Path, monkeypatch
 ) -> None:
-    import subprocess
-
     from locuskit.neighbors import groups_from_proteins
 
     protein = table(tmp_path / "seq.fa", ">A other words\nMAGG\n>B\nMAGG\n>unused\nMAAS\n")

@@ -33,7 +33,9 @@ locuskit neighbors-batch --manifest_tsv families.tsv --loci_tsv loci.tsv \
 
 The manifest command reads the locus table once and uses the same neighborhood
 and homology options as `neighbors`. Each family uses its own set of proteins
-for DIAMOND. LOCUSKIT rejects overlapping input and output paths and repeated
+for DIAMOND. With a shared FASTA, the batch first streams the proteome into a
+temporary FASTA containing only proteins found in the requested windows.
+LOCUSKIT rejects overlapping input and output paths and repeated
 outputs before writing. Each output is replaced atomically. If a later job
 fails, earlier completed tables remain available.
 

@@ -6,6 +6,7 @@ import re
 import subprocess
 import tempfile
 from collections import Counter, defaultdict
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 
@@ -265,6 +266,8 @@ def _family_context(
     cutoff: float | None,
     proteins: Path | None,
     threads: int,
+    *,
+    search_proteins: Path | None = None,
 ) -> list[ContextRow]:
     rows = extract(focals, loci, window)
     assignments: GroupMap = {}
@@ -288,7 +291,7 @@ def _family_context(
             method = "similarity_hits"
         else:
             assert proteins is not None
-            assignments = groups_from_proteins(proteins, keys, cutoff, threads)
+            assignments = groups_from_proteins(search_proteins or proteins, keys, cutoff, threads)
             method = "diamond"
     if method:
         for i, row in enumerate(rows):
@@ -325,6 +328,26 @@ def _check_batch_outputs(outputs: list[Path], inputs: list[Path]) -> None:
             raise ValueError(f"Neighborhood output would also be a directory: {output}")
 
 
+def _batch_proteins(
+    mappings: list[dict[str, str]], loci: list[Locus], window: int, source: Path, output: Path
+) -> None:
+    focals: dict[str, dict[str, str]] = defaultdict(dict)
+    for mapping in mappings:
+        for gene, species in mapping.items():
+            focals[species][gene] = species
+    by_species: dict[str, list[Locus]] = defaultdict(list)
+    for locus in loci:
+        if locus.species_id in focals:
+            by_species[locus.species_id].append(locus)
+    wanted = {
+        row.neighbor_id
+        for species, mapping in focals.items()
+        for row in extract(mapping, by_species[species], window)
+        if row.record_type == "neighbor"
+    }
+    select_proteins(source, output, wanted)
+
+
 def build_batch(
     manifest: Path,
     locus_path: Path,
@@ -351,6 +374,33 @@ def build_batch(
     if hits is None and proteins is None:
         species = {taxon for mapping in mappings for taxon in mapping.values()}
     loci = read_loci(locus_path, species)
-    for (focal_path, output), mapping in zip(tasks, mappings, strict=True):
-        rows = _family_context(mapping, loci, window, groups, hits, cutoff, proteins, threads)
-        write_context(output, rows, [focal_path, *shared])
+    workspace = (
+        tempfile.TemporaryDirectory(prefix="locuskit-batch-")
+        if proteins is not None and len(tasks) > 1
+        else nullcontext()
+    )
+    with workspace as temp:
+        selected = None
+        if temp is not None:
+            assert proteins is not None
+            shared_proteins = Path(temp) / "selected.faa"
+            try:
+                _batch_proteins(mappings, loci, window, proteins, shared_proteins)
+            except ValueError:
+                # Report malformed input at its original family, after earlier outputs.
+                pass
+            else:
+                selected = shared_proteins
+        for (focal_path, output), mapping in zip(tasks, mappings, strict=True):
+            rows = _family_context(
+                mapping,
+                loci,
+                window,
+                groups,
+                hits,
+                cutoff,
+                proteins,
+                threads,
+                search_proteins=selected,
+            )
+            write_context(output, rows, [focal_path, *shared])
