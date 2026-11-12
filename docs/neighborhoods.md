@@ -76,6 +76,12 @@ storage, and retains their groups. Genes missing from the protein FASTA keep
 their coordinates and an empty group. These groups describe sequence similarity. Locus conservation, event
 assignment and homology probabilities need further evidence.
 
+Add `--require_protein_match` with `--protein_fasta` to detect a mismatch
+between locus and FASTA identifiers. If a family has annotated neighbors, at
+least one must match a FASTA identifier. Families with partial protein coverage
+keep their blank groups, and families with no annotated neighbors keep their
+annotation status.
+
 Plain UTF-8 TSV and gzip-compressed TSV are accepted. Named outputs replace
 previous outputs atomically after validation. Output paths may not alias
 inputs.

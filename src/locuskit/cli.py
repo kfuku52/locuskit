@@ -29,6 +29,11 @@ def _neighborhood_options(command: argparse.ArgumentParser) -> None:
         "--hits_tsv", type=Path, help="Headerless DIAMOND qseqid/sseqid/evalue output"
     )
     homology.add_argument("--protein_fasta", type=Path, help="Run DIAMOND on selected proteins")
+    command.add_argument(
+        "--require_protein_match",
+        action="store_true",
+        help="Require a matching FASTA ID in each family with annotated neighbors",
+    )
     command.add_argument("--threads", type=int, default=1, help="Threads for DIAMOND")
     command.add_argument("--evalue_cutoff", help="Hit cutoff (default 0.01 when hits are provided)")
 
@@ -115,9 +120,21 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.threads,
             )
             if args.command == "neighbors":
-                build_context(args.focal_tsv, args.loci_tsv, args.out_file, *options)
+                build_context(
+                    args.focal_tsv,
+                    args.loci_tsv,
+                    args.out_file,
+                    *options,
+                    require_protein_match=args.require_protein_match,
+                )
             else:
-                build_batch(args.manifest_tsv, args.loci_tsv, *options, jobs=args.jobs)
+                build_batch(
+                    args.manifest_tsv,
+                    args.loci_tsv,
+                    *options,
+                    jobs=args.jobs,
+                    require_protein_match=args.require_protein_match,
+                )
         elif args.command == "validate":
             mapping = read_focals(args.focal_tsv) if args.focal_tsv else None
             rows = read_context(args.in_file, mapping)

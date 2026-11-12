@@ -144,13 +144,25 @@ def build_context(
     cutoff: float | None = None,
     proteins: Path | None = None,
     threads: int = 1,
+    *,
+    require_protein_match: bool = False,
 ) -> None:
-    sources = _homology_inputs(groups, hits, cutoff, proteins, threads)
+    sources = _homology_inputs(groups, hits, cutoff, proteins, threads, require_protein_match)
     focals = read_focals(focal_path)
     # Raw hit endpoints omit species, so collision checking needs all loci.
     species = None if hits is not None or proteins is not None else set(focals.values())
     loci = read_loci(locus_path, species)
-    rows = _family_context(focals, loci, window, groups, hits, cutoff, proteins, threads)
+    rows = _family_context(
+        focals,
+        loci,
+        window,
+        groups,
+        hits,
+        cutoff,
+        proteins,
+        threads,
+        require_protein_match=require_protein_match,
+    )
     write_context(output, rows, [focal_path, locus_path, *sources])
 
 
@@ -160,6 +172,7 @@ def _homology_inputs(
     cutoff: float | None,
     proteins: Path | None,
     threads: int,
+    require_protein_match: bool,
 ) -> list[Path]:
     sources = [path for path in (groups, hits, proteins) if path is not None]
     if len(sources) > 1:
@@ -170,6 +183,8 @@ def _homology_inputs(
         raise ValueError("threads must be positive")
     if proteins is not None and cutoff == 0:
         raise ValueError("DIAMOND evalue_cutoff must be positive")
+    if require_protein_match and proteins is None:
+        raise ValueError("require_protein_match requires protein_fasta")
     return sources
 
 
@@ -185,6 +200,7 @@ def _family_context(
     *,
     search_proteins: Path | None = None,
     hit_index: Path | None = None,
+    require_protein_match: bool = False,
 ) -> list[ContextRow]:
     rows = extract(focals, loci, window)
     assignments: GroupMap = {}
@@ -212,6 +228,11 @@ def _family_context(
         else:
             assert proteins is not None
             assignments = groups_from_proteins(search_proteins or proteins, keys, cutoff, threads)
+            if require_protein_match and keys and not assignments:
+                raise ValueError(
+                    f"{proteins}: no FASTA IDs match {len(keys)} annotated neighbors "
+                    f"in the family containing {min(focals)!r}"
+                )
             method = "diamond"
     if method:
         for i, row in enumerate(rows):
@@ -276,11 +297,12 @@ def build_batch(
     threads: int = 1,
     *,
     jobs: int = 1,
+    require_protein_match: bool = False,
 ) -> None:
     """Write independent neighborhood tables using one shared locus read."""
     if jobs < 1:
         raise ValueError("jobs must be positive")
-    sources = _homology_inputs(groups, hits, cutoff, proteins, threads)
+    sources = _homology_inputs(groups, hits, cutoff, proteins, threads, require_protein_match)
     tasks: list[tuple[Path, Path]] = []
     for row in read_table(manifest, ("focal_tsv", "out_file")):
         if not row["focal_tsv"] or not row["out_file"]:
@@ -329,6 +351,7 @@ def build_batch(
             threads=threads,
             search_proteins=selected,
             hit_index=hit_index,
+            require_protein_match=require_protein_match,
         )
 
         def write_results(

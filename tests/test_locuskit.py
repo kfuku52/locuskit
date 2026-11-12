@@ -105,6 +105,51 @@ def test_batch_hits_preserves_family_groups_and_singletons(tmp_path: Path) -> No
     assert groups == {"a2": 1, "a4": None}
 
 
+def test_require_protein_match_distinguishes_empty_and_unmatched_windows(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    loci = table(
+        tmp_path / "loci.tsv",
+        "species_id\tassembly_id\tgene_id\tseqid\tstart\tend\tstrand\n"
+        "A\ta\ta1\tchr\t1\t3\t+\nA\ta\ta2\tchr\t4\t6\t+\nA\ta\ta3\tchr\t7\t9\t+\n"
+        "B\tb\tb1\tchr\t1\t3\t+\nB\tb\tb2\tchr\t4\t6\t+\n",
+    )
+    proteins = table(tmp_path / "seq.faa", ">a1\nMAGG\n")
+    table(tmp_path / "empty.tsv", "gene\tspecies\nunknown\tA\n")
+    table(tmp_path / "matched.tsv", "gene\tspecies\na2\tA\n")
+    unmatched = table(tmp_path / "unmatched.tsv", "gene\tspecies\nb2\tB\n")
+    manifest = table(
+        tmp_path / "jobs.tsv",
+        "focal_tsv\tout_file\nempty.tsv\tempty-out.tsv\nmatched.tsv\tmatched-out.tsv\n"
+        "unmatched.tsv\tunmatched-out.tsv\nmatched.tsv\tlater.tsv\n",
+    )
+    common = ["--loci_tsv", str(loci), "--protein_fasta", str(proteins), "--window", "1"]
+    strict = [*common, "--require_protein_match"]
+    assert main(["neighbors-batch", "--manifest_tsv", str(manifest), "--jobs", "2", *strict]) == 2
+    assert "no FASTA IDs match 1 annotated neighbors" in capsys.readouterr().err
+    assert read_context(tmp_path / "empty-out.tsv")[0].status == "locus_missing"
+    observed = {
+        row.neighbor_id: row.group_size
+        for row in read_context(tmp_path / "matched-out.tsv")
+        if row.record_type == "neighbor"
+    }
+    assert observed == {"a1": 1, "a3": None}
+    assert not (tmp_path / "unmatched-out.tsv").exists()
+    assert not (tmp_path / "later.tsv").exists()
+
+    command = [
+        "neighbors",
+        "--focal_tsv",
+        str(unmatched),
+        "--out_file",
+        str(tmp_path / "single.tsv"),
+    ]
+    assert main([*command, *common]) == 0
+    previous = (tmp_path / "single.tsv").read_bytes()
+    assert main([*command, *strict]) == 2
+    assert (tmp_path / "single.tsv").read_bytes() == previous
+
+
 @pytest.mark.parametrize("bad_later_sequence", [False, True])
 @pytest.mark.parametrize("jobs", [1, 2])
 def test_neighborhood_batch_keeps_protein_searches_local(
