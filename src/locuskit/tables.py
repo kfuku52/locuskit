@@ -63,9 +63,8 @@ def read_table(
             yield dict(zip(header, row, strict=True))
 
 
-def write_table(
-    path: Path, header: tuple[str, ...], rows: Iterable[Iterable[object]], inputs: Iterable[Path]
-) -> None:
+@contextmanager
+def staged_text(path: Path, inputs: Iterable[Path]) -> Iterator[TextIO]:
     path = path.absolute()
     for source in inputs:
         if path.resolve() == source.resolve() or (
@@ -82,18 +81,26 @@ def write_table(
     staged = Path(name)
     try:
         with open_output(staged) as stream:
-            writer = csv.writer(
-                stream, delimiter="\t", lineterminator="\n", quoting=csv.QUOTE_NONE, quotechar=None
-            )
-            writer.writerow(header)
-            for row in rows:
-                fields = ["" if value is None else str(value) for value in row]
-                if len(fields) != len(header) or any(_CONTROL.search(value) for value in fields):
-                    raise ValueError(f"{path}: output row has invalid width or control characters")
-                writer.writerow(fields)
+            yield stream
         os.replace(staged, path)
     finally:
         staged.unlink(missing_ok=True)
+
+
+def write_table(
+    path: Path, header: tuple[str, ...], rows: Iterable[Iterable[object]], inputs: Iterable[Path]
+) -> None:
+    path = path.absolute()
+    with staged_text(path, inputs) as stream:
+        writer = csv.writer(
+            stream, delimiter="\t", lineterminator="\n", quoting=csv.QUOTE_NONE, quotechar=None
+        )
+        writer.writerow(header)
+        for row in rows:
+            fields = ["" if value is None else str(value) for value in row]
+            if len(fields) != len(header) or any(_CONTROL.search(value) for value in fields):
+                raise ValueError(f"{path}: output row has invalid width or control characters")
+            writer.writerow(fields)
 
 
 def identifier(value: str, field: str) -> str:

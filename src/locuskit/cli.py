@@ -12,6 +12,7 @@ from .context import read_context
 from .legacy import export_legacy, import_legacy
 from .loci import extract_loci, read_focals
 from .neighbors import build_batch, build_context
+from .proteins import map_proteins
 from .tables import evalue
 
 
@@ -44,6 +45,11 @@ def parser() -> argparse.ArgumentParser:
     loci.add_argument("--manifest_tsv", required=True, type=Path)
     loci.add_argument("--aliases_tsv", type=Path)
     loci.add_argument("--out_file", required=True, type=Path)
+
+    proteins = commands.add_parser("map-proteins", help="Select proteins and name them by locus ID")
+    proteins.add_argument("--protein_fasta", required=True, action="append", type=Path)
+    proteins.add_argument("--aliases_tsv", required=True, type=Path)
+    proteins.add_argument("--out_file", required=True, type=Path)
 
     neighbors = commands.add_parser("neighbors", help="Build a versioned family neighborhood table")
     neighbors.add_argument("--focal_tsv", required=True, type=Path)
@@ -91,6 +97,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "loci":
             extract_loci(args.manifest_tsv, args.out_file, args.aliases_tsv)
+        elif args.command == "map-proteins":
+            map_proteins(args.protein_fasta, args.aliases_tsv, args.out_file)
         elif args.command in {"neighbors", "neighbors-batch"}:
             cutoff = (
                 evalue(args.evalue_cutoff, "evalue_cutoff")

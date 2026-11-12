@@ -23,6 +23,20 @@ locuskit validate --in_file family.context.tsv --focal_tsv mapping.tsv
 locuskit export-legacy --in_file family.context.tsv --out_file family_synteny.tsv
 ~~~
 
+If the protein FASTA uses different IDs from the locus table, provide a TSV
+with `protein_id` and `gene_id` columns. Choose one representative protein per
+locus in this table. Both sets of IDs must be unique and every selected protein
+must occur once in the supplied FASTA files.
+
+~~~bash
+locuskit map-proteins --protein_fasta species-a.faa.gz --protein_fasta species-b.faa.gz \
+  --aliases_tsv protein-to-gene.tsv --out_file loci.faa
+~~~
+
+The command keeps the selected sequences in input order and uses their gene IDs
+as FASTA headers. Pass the result to `neighbors --protein_fasta` or
+`neighbors-batch --protein_fasta`.
+
 For multiple families using the same annotation, pass a TSV manifest with
 `focal_tsv` and `out_file` columns. Both paths resolve relative to the manifest.
 

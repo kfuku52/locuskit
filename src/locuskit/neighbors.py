@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 import subprocess
 import tempfile
 from collections import Counter, defaultdict
@@ -12,6 +11,7 @@ from pathlib import Path
 
 from .context import ContextRow, positioned, write_context
 from .loci import Locus, read_focals, read_loci
+from .proteins import select_proteins as select_proteins
 from .tables import evalue, identifier, open_text, read_table
 
 GeneKey = tuple[str, str]
@@ -129,41 +129,6 @@ def groups_from_hits(
         for index, genes in enumerate(ordered, 1)
         for gene in genes
     }
-
-
-def select_proteins(source: Path, output: Path, wanted: set[str]) -> set[str]:
-    """Stream the protein input and retain only sequences for selected loci."""
-    seen: set[str] = set()
-    gene = ""
-    has_sequence = False
-    with open_text(source) as stream, output.open("w", encoding="utf-8", newline="") as selected:
-        for number, line in enumerate(stream, 1):
-            line = line.strip()
-            if not line:
-                continue
-            if line.startswith(">"):
-                if gene in wanted and not has_sequence:
-                    raise ValueError(f"{source}: empty protein sequence for {gene!r}")
-                header = line[1:].split()
-                if not header:
-                    raise ValueError(f"{source}:{number}: empty FASTA identifier")
-                gene = identifier(header[0], "protein FASTA identifier")
-                has_sequence = False
-                if gene in wanted:
-                    if gene in seen:
-                        raise ValueError(f"{source}: duplicate protein sequence for {gene!r}")
-                    seen.add(gene)
-                    selected.write(f">{gene}\n")
-            elif not gene:
-                raise ValueError(f"{source}:{number}: sequence before FASTA header")
-            elif gene in wanted:
-                if re.fullmatch(r"[A-Za-z*]+", line) is None:
-                    raise ValueError(f"{source}:{number}: invalid protein FASTA sequence")
-                selected.write(line + "\n")
-                has_sequence = True
-        if gene in wanted and not has_sequence:
-            raise ValueError(f"{source}: empty protein sequence for {gene!r}")
-    return seen
 
 
 def groups_from_proteins(

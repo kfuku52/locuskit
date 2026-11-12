@@ -14,6 +14,41 @@ def table(path: Path, text: str) -> Path:
     return path
 
 
+@pytest.mark.parametrize("second_id", ["pep-a", "pep-b", "unmapped"])
+def test_map_proteins_selects_exact_ids_and_preserves_output_on_error(
+    tmp_path: Path, second_id: str
+) -> None:
+    first = tmp_path / "first.faa.gz"
+    with gzip.open(first, "wt") as stream:
+        stream.write(">unselected other isoform\nMK\n>pep-a description\nMAG\nG*\n")
+    second = table(tmp_path / "second.faa", f">{second_id}\nTT\n")
+    aliases = table(tmp_path / "aliases.tsv", "protein_id\tgene_id\npep-b\tB\npep-a\tA\n")
+    output = tmp_path / "mapped.faa.gz"
+    with gzip.open(output, "wt") as stream:
+        stream.write(">old\nAT\n")
+    previous = output.read_bytes()
+
+    status = main(
+        [
+            "map-proteins",
+            "--protein_fasta",
+            str(first),
+            "--protein_fasta",
+            str(second),
+            "--aliases_tsv",
+            str(aliases),
+            "--out_file",
+            str(output),
+        ]
+    )
+    if second_id == "pep-b":
+        assert status == 0
+        assert gzip.decompress(output.read_bytes()) == b">A\nMAG\nG*\n>B\nTT\n"
+    else:
+        assert status == 2
+        assert output.read_bytes() == previous
+
+
 def test_neighborhood_batch_matches_single_family_tables(tmp_path: Path) -> None:
     loci = table(
         tmp_path / "loci.tsv",
