@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from locuskit.cli import main
 from locuskit.context import COLUMNS, read_context
 from locuskit.tables import write_table
@@ -8,6 +10,64 @@ from locuskit.tables import write_table
 def table(path: Path, text: str) -> Path:
     path.write_text(text, encoding="utf-8")
     return path
+
+
+def test_neighborhood_batch_matches_single_family_tables(tmp_path: Path) -> None:
+    loci = table(
+        tmp_path / "loci.tsv",
+        "species_id\tassembly_id\tgene_id\tseqid\tstart\tend\tstrand\n"
+        "A\ta\ta1\tchr\t1\t3\t+\nA\ta\ta2\tchr\t4\t6\t-\nB\tb\tb1\tchr\t2\t7\t+\n",
+    )
+    manifest = table(
+        tmp_path / "jobs.tsv",
+        "focal_tsv\tout_file\nf1.tsv\tresult/one.tsv.gz\nf2.tsv\tresult/two.tsv\n",
+    )
+    table(tmp_path / "f1.tsv", "gene\tspecies\na2\tA\nmissing\tB\n")
+    table(tmp_path / "f2.tsv", "gene\tspecies\nb1\tB\nother\tC\n")
+    groups = table(tmp_path / "groups.tsv", "species_id\tgene_id\tgroup_id\nA\ta1\tgrp\n")
+    common = ["--loci_tsv", str(loci), "--groups_tsv", str(groups), "--window", "1"]
+    assert main(["neighbors-batch", "--manifest_tsv", str(manifest), *common]) == 0
+    for index, name in enumerate(("one.tsv.gz", "two.tsv"), 1):
+        single = tmp_path / name
+        focal = tmp_path / f"f{index}.tsv"
+        assert (
+            main(["neighbors", "--focal_tsv", str(focal), "--out_file", str(single), *common]) == 0
+        )
+        assert single.read_bytes() == (tmp_path / "result" / name).read_bytes()
+
+
+@pytest.mark.parametrize(
+    "conflict", ["focal.tsv", "linked.tsv", "symlink.tsv", "out.tsv", "out.tsv/nested.tsv"]
+)
+def test_neighborhood_batch_checks_all_outputs_before_writing(
+    tmp_path: Path, conflict: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    focal = table(tmp_path / "focal.tsv", "gene\tspecies\na\tA\n")
+    (tmp_path / "linked.tsv").hardlink_to(focal)
+    (tmp_path / "symlink.tsv").symlink_to(tmp_path / "missing.tsv")
+    loci = table(
+        tmp_path / "loci.tsv",
+        "species_id\tassembly_id\tgene_id\tseqid\tstart\tend\tstrand\nA\ta\ta\tchr\t1\t3\t+\n",
+    )
+    manifest = table(
+        tmp_path / "jobs.tsv",
+        f"focal_tsv\tout_file\nfocal.tsv\tout.tsv\nfocal.tsv\t{conflict}\n",
+    )
+    assert (
+        main(
+            [
+                "neighbors-batch",
+                "--manifest_tsv",
+                str(manifest),
+                "--loci_tsv",
+                str(loci),
+            ]
+        )
+        == 2
+    )
+    assert "neighborhood output" in capsys.readouterr().err.lower()
+    assert not (tmp_path / "out.tsv").exists()
+    assert focal.read_text() == "gene\tspecies\na\tA\n"
 
 
 def test_annotation_to_context_with_aliases_and_missing_data(tmp_path: Path) -> None:

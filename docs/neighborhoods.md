@@ -23,6 +23,20 @@ locuskit validate --in_file family.context.tsv --focal_tsv mapping.tsv
 locuskit export-legacy --in_file family.context.tsv --out_file family_synteny.tsv
 ~~~
 
+For multiple families using the same annotation, pass a TSV manifest with
+`focal_tsv` and `out_file` columns. Both paths resolve relative to the manifest.
+
+~~~bash
+locuskit neighbors-batch --manifest_tsv families.tsv --loci_tsv loci.tsv \
+  --protein_fasta proteins.faa --window 20
+~~~
+
+The manifest command reads the locus table once and uses the same neighborhood
+and homology options as `neighbors`. Each family uses its own set of proteins
+for DIAMOND. LOCUSKIT rejects overlapping input and output paths and repeated
+outputs before writing. Each output is replaced atomically. If a later job
+fails, earlier completed tables remain available.
+
 The focal mapping uses gene and species as in aioi. The locus table has
 species_id, assembly_id, gene_id, seqid, start, end and strand. Existing
 normalized coordinates can be passed directly. Use positive, one-based,

@@ -228,6 +228,22 @@ def build_context(
     proteins: Path | None = None,
     threads: int = 1,
 ) -> None:
+    sources = _homology_inputs(groups, hits, cutoff, proteins, threads)
+    focals = read_focals(focal_path)
+    # Raw hit endpoints omit species, so collision checking needs all loci.
+    species = None if hits is not None or proteins is not None else set(focals.values())
+    loci = read_loci(locus_path, species)
+    rows = _family_context(focals, loci, window, groups, hits, cutoff, proteins, threads)
+    write_context(output, rows, [focal_path, locus_path, *sources])
+
+
+def _homology_inputs(
+    groups: Path | None,
+    hits: Path | None,
+    cutoff: float | None,
+    proteins: Path | None,
+    threads: int,
+) -> list[Path]:
     sources = [path for path in (groups, hits, proteins) if path is not None]
     if len(sources) > 1:
         raise ValueError("Choose one homology input")
@@ -237,11 +253,19 @@ def build_context(
         raise ValueError("threads must be positive")
     if proteins is not None and cutoff == 0:
         raise ValueError("DIAMOND evalue_cutoff must be positive")
-    focals = read_focals(focal_path)
-    # Raw hit endpoints omit species, so collision checking needs the complete
-    # locus inventory in those modes.
-    species = None if hits is not None or proteins is not None else set(focals.values())
-    loci = read_loci(locus_path, species)
+    return sources
+
+
+def _family_context(
+    focals: dict[str, str],
+    loci: list[Locus],
+    window: int,
+    groups: Path | None,
+    hits: Path | None,
+    cutoff: float | None,
+    proteins: Path | None,
+    threads: int,
+) -> list[ContextRow]:
     rows = extract(focals, loci, window)
     assignments: GroupMap = {}
     method = ""
@@ -256,7 +280,9 @@ def build_context(
         counts = Counter(loc.gene_id for loc in loci if loc.gene_id in selected)
         conflicts = sorted(gene for gene, count in counts.items() if count > 1)
         if conflicts:
-            raise ValueError(f"{sources[0]}: repeated sequence ID across species: {conflicts[0]!r}")
+            raise ValueError(
+                f"{hits or proteins}: repeated sequence ID across species: {conflicts[0]!r}"
+            )
         if hits is not None:
             assignments = groups_from_hits(hits, keys, cutoff)
             method = "similarity_hits"
@@ -270,4 +296,61 @@ def build_context(
             rows[i] = replace(
                 row, group_id=group, group_size=size, evalue_cutoff=cutoff, group_method=method
             )
-    write_context(output, rows, [focal_path, locus_path, *sources])
+    return rows
+
+
+def _file_identity(path: Path) -> tuple[int, int] | None:
+    try:
+        stat = path.stat()
+    except FileNotFoundError:
+        return None
+    return stat.st_dev, stat.st_ino
+
+
+def _check_batch_outputs(outputs: list[Path], inputs: list[Path]) -> None:
+    paths = {path.resolve() for path in inputs}
+    identities = {identity for path in inputs if (identity := _file_identity(path)) is not None}
+    for output in outputs:
+        resolved, identity = output.resolve(), _file_identity(output)
+        if output.is_symlink() or (identity is not None and not output.is_file()):
+            raise ValueError(f"Invalid neighborhood output: {output}")
+        if resolved in paths or (identity is not None and identity in identities):
+            raise ValueError(f"Neighborhood output aliases another output or an input: {output}")
+        paths.add(resolved)
+        if identity is not None:
+            identities.add(identity)
+    resolved_outputs = {output.resolve() for output in outputs}
+    for output in resolved_outputs:
+        if any(parent in resolved_outputs for parent in output.parents):
+            raise ValueError(f"Neighborhood output would also be a directory: {output}")
+
+
+def build_batch(
+    manifest: Path,
+    locus_path: Path,
+    window: int,
+    groups: Path | None = None,
+    hits: Path | None = None,
+    cutoff: float | None = None,
+    proteins: Path | None = None,
+    threads: int = 1,
+) -> None:
+    """Write independent neighborhood tables using one shared locus read."""
+    sources = _homology_inputs(groups, hits, cutoff, proteins, threads)
+    tasks: list[tuple[Path, Path]] = []
+    for row in read_table(manifest, ("focal_tsv", "out_file")):
+        if not row["focal_tsv"] or not row["out_file"]:
+            raise ValueError(f"{manifest}: expected focal_tsv and out_file paths")
+        tasks.append((manifest.parent / row["focal_tsv"], manifest.parent / row["out_file"]))
+    if not tasks:
+        raise ValueError(f"{manifest}: no neighborhood jobs")
+    shared = [manifest, locus_path, *sources]
+    _check_batch_outputs([output for _, output in tasks], [*shared, *(f for f, _ in tasks)])
+    mappings = [read_focals(focal_path) for focal_path, _ in tasks]
+    species = None
+    if hits is None and proteins is None:
+        species = {taxon for mapping in mappings for taxon in mapping.values()}
+    loci = read_loci(locus_path, species)
+    for (focal_path, output), mapping in zip(tasks, mappings, strict=True):
+        rows = _family_context(mapping, loci, window, groups, hits, cutoff, proteins, threads)
+        write_context(output, rows, [focal_path, *shared])

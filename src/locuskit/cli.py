@@ -11,8 +11,25 @@ from . import __version__
 from .context import read_context
 from .legacy import export_legacy, import_legacy
 from .loci import extract_loci, read_focals
-from .neighbors import build_context
+from .neighbors import build_batch, build_context
 from .tables import evalue
+
+
+def _neighborhood_options(command: argparse.ArgumentParser) -> None:
+    command.add_argument("--loci_tsv", required=True, type=Path)
+    command.add_argument(
+        "--window", default=5, type=int, help="Maximum loci on each side of a focal gene"
+    )
+    homology = command.add_mutually_exclusive_group()
+    homology.add_argument(
+        "--groups_tsv", type=Path, help="Headered species_id/gene_id/group_id table"
+    )
+    homology.add_argument(
+        "--hits_tsv", type=Path, help="Headerless DIAMOND qseqid/sseqid/evalue output"
+    )
+    homology.add_argument("--protein_fasta", type=Path, help="Run DIAMOND on selected proteins")
+    command.add_argument("--threads", type=int, default=1, help="Threads for DIAMOND")
+    command.add_argument("--evalue_cutoff", help="Hit cutoff (default 0.01 when hits are provided)")
 
 
 def parser() -> argparse.ArgumentParser:
@@ -30,23 +47,16 @@ def parser() -> argparse.ArgumentParser:
 
     neighbors = commands.add_parser("neighbors", help="Build a versioned family neighborhood table")
     neighbors.add_argument("--focal_tsv", required=True, type=Path)
-    neighbors.add_argument("--loci_tsv", required=True, type=Path)
-    neighbors.add_argument(
-        "--window", default=5, type=int, help="Maximum loci on each side of a focal gene"
-    )
-    homology = neighbors.add_mutually_exclusive_group()
-    homology.add_argument(
-        "--groups_tsv", type=Path, help="Headered species_id/gene_id/group_id table"
-    )
-    homology.add_argument(
-        "--hits_tsv", type=Path, help="Headerless DIAMOND qseqid/sseqid/evalue output"
-    )
-    homology.add_argument("--protein_fasta", type=Path, help="Run DIAMOND on selected proteins")
-    neighbors.add_argument("--threads", type=int, default=1, help="Threads for DIAMOND")
-    neighbors.add_argument(
-        "--evalue_cutoff", help="Hit cutoff (default 0.01 when hits are provided)"
-    )
     neighbors.add_argument("--out_file", required=True, type=Path)
+    _neighborhood_options(neighbors)
+
+    batch = commands.add_parser(
+        "neighbors-batch", help="Build neighborhood tables from a job manifest"
+    )
+    batch.add_argument(
+        "--manifest_tsv", required=True, type=Path, help="Table with focal_tsv and out_file columns"
+    )
+    _neighborhood_options(batch)
 
     validate = commands.add_parser("validate", help="Check a versioned family neighborhood table")
     validate.add_argument("--in_file", required=True, type=Path)
@@ -81,16 +91,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "loci":
             extract_loci(args.manifest_tsv, args.out_file, args.aliases_tsv)
-        elif args.command == "neighbors":
+        elif args.command in {"neighbors", "neighbors-batch"}:
             cutoff = (
                 evalue(args.evalue_cutoff, "evalue_cutoff")
                 if args.evalue_cutoff is not None
                 else None
             )
-            build_context(
-                args.focal_tsv,
-                args.loci_tsv,
-                args.out_file,
+            options = (
                 args.window,
                 args.groups_tsv,
                 args.hits_tsv,
@@ -98,6 +105,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.protein_fasta,
                 args.threads,
             )
+            if args.command == "neighbors":
+                build_context(args.focal_tsv, args.loci_tsv, args.out_file, *options)
+            else:
+                build_batch(args.manifest_tsv, args.loci_tsv, *options)
         elif args.command == "validate":
             mapping = read_focals(args.focal_tsv) if args.focal_tsv else None
             rows = read_context(args.in_file, mapping)
