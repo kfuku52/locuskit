@@ -1353,7 +1353,7 @@ wheels = [
 
 [[package]]
 name = "locuskit"
-version = "0.2.0.dev11"
+version = "0.2.0.dev12"
 source = { editable = "." }
 
 [package.optional-dependencies]

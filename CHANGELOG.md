@@ -7,6 +7,11 @@ untagged development milestones, not published release artifacts. See the
 
 ## Unreleased
 
+- Share locus tables, staged protein sequences, hit tables, and homology groups
+  across neighborhood jobs to reduce repeated I/O.
+- Support bounded concurrent neighborhood searches, explicit representative
+  protein IDs, and optional reporting of unmatched protein identifiers.
+
 - Introduce the LOCUSKIT distribution and CLI for strand-aware genomic
   neighborhoods and GeneGalleon tree-plot TSV conversion. Keep the
   `kffractbias` command and Python package available.

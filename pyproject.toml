@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "locuskit"
-version = "0.2.0.dev11"
+version = "0.2.0.dev12"
 description = "Genomic neighborhoods, collinearity and fractionation analysis"
 readme = "README.md"
 requires-python = ">=3.11"

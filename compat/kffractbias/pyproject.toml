@@ -4,16 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kffractbias"
-version = "0.2.0.dev11"
+version = "0.2.0.dev12"
 description = "Compatibility metadata for consumers of the FractBias module in LOCUSKIT"
 requires-python = ">=3.11"
 license = "MIT"
-dependencies = ["locuskit==0.2.0.dev11"]
+dependencies = ["locuskit==0.2.0.dev12"]
 
 [project.optional-dependencies]
-plot = ["locuskit[plot]==0.2.0.dev11"]
-compare = ["locuskit[compare]==0.2.0.dev11"]
-all = ["locuskit[all]==0.2.0.dev11"]
+plot = ["locuskit[plot]==0.2.0.dev12"]
+compare = ["locuskit[compare]==0.2.0.dev12"]
+all = ["locuskit[all]==0.2.0.dev12"]
 
 [tool.setuptools]
 packages = []
