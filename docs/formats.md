@@ -319,3 +319,6 @@ The separate `report` command has shared schema 1 and opt-in independent
 pairwise schema 2. Their locus/window fields, counts and missingness are
 described in [comparison reports](comparison.md). The `calculate`, `compare`
 and `selfcompare` formats above are unchanged.
+
+The optional replicon manifest, extended locus intervals and circular context
+schema 2 are described in [Circular organelle genomes](neighborhoods.md#circular-organelle-genomes).

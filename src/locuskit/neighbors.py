@@ -19,20 +19,37 @@ from .loci import Locus, read_focals, read_loci
 from .proteins import select_proteins as select_proteins
 from .tables import identifier, read_table
 
+PositionIndex = dict[GeneKey, tuple[list[Locus], int]]
 
-def extract(focals: dict[str, str], loci: list[Locus], window: int) -> list[ContextRow]:
-    if window < 1:
-        raise ValueError("Window must be a positive integer")
+
+def _index(loci: list[Locus], wanted: set[GeneKey]) -> tuple[PositionIndex, set[str]]:
     contigs: dict[tuple[str, str], list[Locus]] = defaultdict(list)
     for locus in loci:
         contigs[locus.species_id, locus.seqid].append(locus)
-    positions: dict[GeneKey, tuple[list[Locus], int]] = {}
-    annotated_species = {locus.species_id for locus in loci}
+    positions: PositionIndex = {}
     for contig in contigs.values():
         contig.sort(key=lambda loc: (loc.start, loc.end, loc.gene_id))
         for index, locus in enumerate(contig):
-            if focals.get(locus.gene_id) == locus.species_id:
-                positions[locus.species_id, locus.gene_id] = contig, index
+            key = locus.species_id, locus.gene_id
+            if key in wanted:
+                positions[key] = contig, index
+    return positions, {species for species, _ in contigs}
+
+
+def extract(
+    focals: dict[str, str],
+    loci: list[Locus],
+    window: int,
+    *,
+    index_data: tuple[PositionIndex, set[str]] | None = None,
+) -> list[ContextRow]:
+    if window < 1:
+        raise ValueError("Window must be a positive integer")
+    positions, annotated_species = (
+        index_data
+        if index_data is not None
+        else _index(loci, {(species, gene) for gene, species in focals.items()})
+    )
     result: list[ContextRow] = []
     for gene, species in sorted(focals.items()):
         position = positions.get((species, gene))
@@ -49,6 +66,9 @@ def extract(focals: dict[str, str], loci: list[Locus], window: int) -> list[Cont
         left = min(window, index)
         right = min(window, len(contig) - index - 1)
         up, down = (left, right) if sign == 1 else (right, left)
+        if focal.circular_length is not None:
+            up = min(window, (len(contig) - 1) // 2)
+            down = min(window, len(contig) // 2)
         result.append(
             replace(
                 focal,
@@ -60,7 +80,7 @@ def extract(focals: dict[str, str], loci: list[Locus], window: int) -> list[Cont
         )
         for offset in range(-up, down + 1):
             if offset:
-                neighbor = contig[index + sign * offset]
+                neighbor = contig[(index + sign * offset) % len(contig)]
                 result.append(
                     replace(
                         positioned("neighbor", gene, neighbor),
@@ -198,12 +218,14 @@ def _family_context(
     proteins: Path | None,
     threads: int,
     *,
+    shared_index: tuple[PositionIndex, set[str]] | None = None,
+    duplicate_ids: set[str] | None = None,
     shared_groups: GroupMap | None = None,
     search_proteins: Path | None = None,
     hit_index: Path | None = None,
     require_protein_match: bool = False,
 ) -> list[ContextRow]:
-    rows = extract(focals, loci, window)
+    rows = extract(focals, loci, window, index_data=shared_index)
     assignments: GroupMap = {}
     method = ""
     if groups is not None:
@@ -214,8 +236,10 @@ def _family_context(
             cutoff = 0.01
         keys = {(row.species_id, row.neighbor_id) for row in rows if row.record_type == "neighbor"}
         selected = {gene for _, gene in keys}
-        counts = Counter(loc.gene_id for loc in loci if loc.gene_id in selected)
-        conflicts = sorted(gene for gene, count in counts.items() if count > 1)
+        if duplicate_ids is None:
+            counts = Counter(loc.gene_id for loc in loci if loc.gene_id in selected)
+            duplicate_ids = {gene for gene, count in counts.items() if count > 1}
+        conflicts = sorted(selected & duplicate_ids)
         if conflicts:
             raise ValueError(
                 f"{hits or proteins}: repeated sequence ID across species: {conflicts[0]!r}"
@@ -270,19 +294,20 @@ def _check_batch_outputs(outputs: list[Path], inputs: list[Path]) -> None:
             raise ValueError(f"Neighborhood output would also be a directory: {output}")
 
 
-def _batch_neighbor_ids(mappings: list[dict[str, str]], loci: list[Locus], window: int) -> set[str]:
+def _batch_neighbor_ids(
+    mappings: list[dict[str, str]],
+    loci: list[Locus],
+    window: int,
+    shared_index: tuple[PositionIndex, set[str]],
+) -> set[str]:
     focals: dict[str, dict[str, str]] = defaultdict(dict)
     for mapping in mappings:
         for gene, species in mapping.items():
             focals[species][gene] = species
-    by_species: dict[str, list[Locus]] = defaultdict(list)
-    for locus in loci:
-        if locus.species_id in focals:
-            by_species[locus.species_id].append(locus)
     return {
         row.neighbor_id
-        for species, mapping in focals.items()
-        for row in extract(mapping, by_species[species], window)
+        for mapping in focals.values()
+        for row in extract(mapping, loci, window, index_data=shared_index)
         if row.record_type == "neighbor"
     }
 
@@ -318,6 +343,9 @@ def build_batch(
     if hits is None and proteins is None:
         species = {taxon for mapping in mappings for taxon in mapping.values()}
     loci = read_loci(locus_path, species)
+    shared_index = _index(
+        loci, {(species, gene) for mapping in mappings for gene, species in mapping.items()}
+    )
     shared_groups = (
         read_groups(groups) if groups is not None and len(tasks) > 1 and window > 0 else None
     )
@@ -329,8 +357,11 @@ def build_batch(
     with workspace as temp:
         selected = None
         hit_index = None
+        duplicate_ids = None
         if temp is not None:
-            wanted = _batch_neighbor_ids(mappings, loci, window)
+            wanted = _batch_neighbor_ids(mappings, loci, window, shared_index)
+            counts = Counter(locus.gene_id for locus in loci if locus.gene_id in wanted)
+            duplicate_ids = {gene for gene, count in counts.items() if count > 1}
             if hits is not None:
                 hit_index = Path(temp) / "hits.sqlite"
                 index_hits(hits, hit_index, wanted, 0.01 if cutoff is None else cutoff)
@@ -353,6 +384,8 @@ def build_batch(
             cutoff=cutoff,
             proteins=proteins,
             threads=threads,
+            shared_index=shared_index,
+            duplicate_ids=duplicate_ids,
             shared_groups=shared_groups,
             search_proteins=selected,
             hit_index=hit_index,

@@ -48,6 +48,11 @@ def parser() -> argparse.ArgumentParser:
 
     loci = commands.add_parser("loci", help="Export ordered loci from a genome annotation manifest")
     loci.add_argument("--manifest_tsv", required=True, type=Path)
+    loci.add_argument(
+        "--replicons_tsv",
+        type=Path,
+        help="Per-contig species_id/assembly_id/seqid/topology/length TSV",
+    )
     loci.add_argument("--aliases_tsv", type=Path)
     loci.add_argument("--out_file", required=True, type=Path)
 
@@ -102,7 +107,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser().parse_args(arguments)
     try:
         if args.command == "loci":
-            extract_loci(args.manifest_tsv, args.out_file, args.aliases_tsv)
+            extract_loci(args.manifest_tsv, args.out_file, args.aliases_tsv, args.replicons_tsv)
         elif args.command == "map-proteins":
             map_proteins(args.protein_fasta, args.aliases_tsv, args.out_file)
         elif args.command in {"neighbors", "neighbors-batch"}:
@@ -140,7 +145,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             rows = read_context(args.in_file, mapping)
             count = sum(row.record_type == "focal" for row in rows)
             print(
-                f"LOCUSKIT context v1: {count} focal records, {len(rows) - count} neighbor records"
+                f"LOCUSKIT context v{2 if any(r.circular_length for r in rows) else 1}: {count} focal records, {len(rows) - count} neighbor records"
             )
         elif args.command == "import-legacy":
             import_legacy(args.in_file, args.out_file, args.focal_tsv)

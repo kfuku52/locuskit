@@ -143,3 +143,29 @@ metadata-only project under compat/kffractbias alongside LOCUSKIT. In a migratio
 environment, remove the previous full kffractbias distribution before installing
 LOCUSKIT and its metadata shim so that a single wheel owns the Python files.
 The [FractBias user guide](fractbias.md) describes the analyses and citation.
+
+### Circular organelle genomes
+
+Pass `--replicons_tsv replicons.tsv` to `locuskit loci`. Supply one row per
+annotated replicon with columns `species_id`, `assembly_id`, `seqid`,
+`topology` (`linear` or `circular`) and `length` in bases. Use distinct GFF IDs
+for physical copies, including inverted repeats. For example, to declare an
+Arabidopsis plastome, use the assembly and sequence ID from the GFF and length
+154478 for NC_000932.1. The resulting loci TSV is accepted directly by both
+neighborhood commands. Without this option the original linear format is used.
+
+Intervals are 1-based, inclusive and ordered around the shortest arc that
+contains the annotated parts, reversed on the minus strand. The largest
+uncovered gap separates the last and first parts. Equal gaps favor the
+lowest start. This is genomic order, not a reconstruction of trans-splicing.
+A span crossing the origin has an end greater than the replicon length.
+The intervals column gives each physical segment within the replicon.
+Multiple copies are identified by their physical locus IDs. Compare their
+signed neighbors and homology assignments when assessing copy identity.
+
+On a circle the nearest loci wrap across the origin. At most one offset is
+reported per other locus, with an evenly distant opposite locus assigned
+downstream. The actual upstream and downstream counts are reported separately.
+Tables containing circular positions use context schema 2, which adds
+`circular_length`; the command continues to read and write schema 1 for
+ordinary linear neighborhoods.

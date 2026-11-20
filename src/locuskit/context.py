@@ -31,6 +31,7 @@ COLUMNS = (
     "evalue_cutoff",
     "group_method",
 )
+CIRCULAR_COLUMNS = (*COLUMNS, "circular_length")
 STATUSES = {
     "observed",
     "annotation_missing",
@@ -63,7 +64,11 @@ class ContextRow:
     evalue_cutoff: float | None = None
     group_method: str = ""
 
-    def cells(self) -> tuple[object, ...]:
+    circular_length: int | None = None
+
+    def cells(self, extended: bool = False) -> tuple[object, ...]:
+        if extended:
+            return ("2", *_ROW_FIELDS(self), self.circular_length)
         return ("1", *_ROW_FIELDS(self))
 
 
@@ -77,6 +82,7 @@ def positioned(record_type: str, focal: str, locus: Locus) -> ContextRow:
         locus.start,
         locus.end,
         locus.strand,
+        circular_length=locus.circular_length,
     )
 
 
@@ -90,8 +96,14 @@ def has_locus(row: ContextRow) -> bool:
     )
     if any(bits) != all(bits):
         raise ValueError(f"{row.focal_id}: coordinates must be complete or absent")
+    if row.circular_length is not None and (not all(bits) or row.circular_length < 1):
+        raise ValueError(f"{row.focal_id}: invalid circular replicon metadata")
     if all(bits):
         assert row.start is not None and row.end is not None
+        if row.circular_length is not None and (
+            row.start > row.circular_length or row.end - row.start >= row.circular_length
+        ):
+            raise ValueError(f"{row.focal_id}: coordinates outside circular replicon")
         if row.start < 1 or row.start > row.end or row.strand not in {"+", "-", ".", "?"}:
             raise ValueError(f"{row.focal_id}: invalid coordinates or strand")
     return all(bits)
@@ -104,6 +116,7 @@ def validate_context(rows: list[ContextRow], focals: dict[str, str] | None = Non
     groups_by_gene: dict[tuple[str, str], str] = {}
     coordinates: dict[str, dict[str, ContextRow]] = defaultdict(dict)
     assemblies: dict[str, str] = {}
+    lengths: dict[tuple[str, str, str], int | None] = {}
     cutoffs: set[float] = set()
     methods: set[str] = set()
     for row in rows:
@@ -165,6 +178,9 @@ def validate_context(rows: list[ContextRow], focals: dict[str, str] | None = Non
             raise ValueError(f"Unknown context record type: {row.record_type!r}")
         if locus:
             assert row.start is not None and row.end is not None
+            contig = row.species_id, row.assembly_id, row.seqid
+            if lengths.setdefault(contig, row.circular_length) != row.circular_length:
+                raise ValueError(f"{contig}: inconsistent circular metadata")
             gene_id = row.focal_id if row.record_type == "focal" else row.neighbor_id
             prior = coordinates[row.species_id].setdefault(gene_id, row)
             if prior is not row and (
@@ -209,6 +225,8 @@ def validate_context(rows: list[ContextRow], focals: dict[str, str] | None = Non
             if len(linked) != up + down or any(not -up <= offset <= down for offset in linked):
                 raise ValueError(f"{gene}: offsets do not match the stated observed coverage")
             previous: tuple[int, int, str] | None = None
+            wraps = 0
+            first_order = None
             direction = 1 if focal.strand == "+" else -1
             for offset in range(-up, down + 1):
                 row = linked[offset] if offset else focal
@@ -224,8 +242,19 @@ def validate_context(rows: list[ContextRow], focals: dict[str, str] | None = Non
                     (direction == 1 and previous >= order)
                     or (direction == -1 and previous <= order)
                 ):
-                    raise ValueError(f"{gene}: offsets contradict coordinates or focal strand")
+                    wraps += 1
+                if first_order is None:
+                    first_order = order
                 previous = order
+            if (
+                focal.circular_length
+                and previous != first_order
+                and previous is not None
+                and first_order is not None
+            ):
+                wraps += int(previous > first_order if direction == 1 else previous < first_order)
+            if wraps > int(focal.circular_length is not None):
+                raise ValueError(f"{gene}: offsets contradict coordinates or focal strand")
         elif linked:
             raise ValueError(f"{gene}: neighbors supplied for an unavailable focal")
     sizes: dict[str, int] = defaultdict(int)
@@ -236,7 +265,7 @@ def validate_context(rows: list[ContextRow], focals: dict[str, str] | None = Non
 
 
 def parse_row(row: dict[str, str], path: Path, identifiers: dict[str, str]) -> ContextRow:
-    if row["schema_version"] != "1":
+    if row["schema_version"] != ("2" if "circular_length" in row else "1"):
         raise ValueError(f"{path}: unsupported context schema version {row['schema_version']!r}")
 
     def num(field: str, minimum: int | None = None) -> int | None:
@@ -267,12 +296,16 @@ def parse_row(row: dict[str, str], path: Path, identifiers: dict[str, str]) -> C
         num("group_size", 1),
         evalue(row["evalue_cutoff"], "evalue_cutoff") if row["evalue_cutoff"] else None,
         identifiers.setdefault(row["group_method"], row["group_method"]),
+        num("circular_length", 1) if "circular_length" in row else None,
     )
 
 
 def read_context(path: Path, focals: dict[str, str] | None = None) -> list[ContextRow]:
     identifiers: dict[str, str] = {}
-    rows = [parse_row(row, path, identifiers) for row in read_table(path, COLUMNS, exact=True)]
+    rows = [
+        parse_row(row, path, identifiers)
+        for row in read_table(path, COLUMNS, exact=True, alternate=CIRCULAR_COLUMNS)
+    ]
     identifiers.clear()
     validate_context(rows, focals)
     return rows
@@ -280,4 +313,10 @@ def read_context(path: Path, focals: dict[str, str] | None = None) -> list[Conte
 
 def write_context(path: Path, rows: list[ContextRow], inputs: list[Path]) -> None:
     validate_context(rows)
-    write_table(path, COLUMNS, (row.cells() for row in rows), inputs)
+    extended = any(row.circular_length is not None for row in rows)
+    write_table(
+        path,
+        CIRCULAR_COLUMNS if extended else COLUMNS,
+        (row.cells(extended) for row in rows),
+        inputs,
+    )

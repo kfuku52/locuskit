@@ -40,7 +40,7 @@ def open_output(path: Path) -> Iterator[TextIO]:
 
 
 def read_table(
-    path: Path, required: tuple[str, ...], *, exact: bool = False
+    path: Path, required: tuple[str, ...], *, exact: bool = False, alternate: tuple[str, ...] = ()
 ) -> Iterator[dict[str, str]]:
     with open_text(path) as stream:
         reader = csv.reader(stream, delimiter="\t", quoting=csv.QUOTE_NONE, quotechar=None)
@@ -50,7 +50,7 @@ def read_table(
             or len(header) != len(set(header))
             or not all(header)
             or not set(required).issubset(header)
-            or (exact and tuple(header) != required)
+            or (exact and tuple(header) != required and tuple(header) != alternate)
         ):
             raise ValueError(f"{path}: invalid header, expected {', '.join(required)}")
         for line, row in enumerate(reader, 2):

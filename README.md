@@ -66,3 +66,5 @@ cite the [original FractBias paper](https://doi.org/10.1093/bioinformatics/btw66
 LOCUSKIT uses the [MIT License](LICENSE), which retains the
 original FractBias copyright. See [Contributing](CONTRIBUTING.md), the
 [Changelog](CHANGELOG.md), and the [Security policy](SECURITY.md).
+
+For circular plastids and mitochondria, [declare replicon lengths to extract neighborhoods across the origin](docs/neighborhoods.md#circular-organelle-genomes).

@@ -358,6 +358,7 @@ def _mapped_gff_intervals(
     selected_feature: str,
     selected_attribute: str,
     selected_matches: set[str],
+    pieces: dict[str, set[tuple[int, int]]] | None = None,
 ) -> tuple[Gene, ...]:
     intervals: dict[str, Gene] = {}
     for row in _iter_gff(gff_path):
@@ -367,6 +368,8 @@ def _mapped_gff_intervals(
             if gene_id not in selected_matches:
                 continue
             validate_gene_identifier(gene_id, "GFF", f"{gff_path}:{row.line_number}")
+            if pieces is not None:
+                pieces.setdefault(gene_id, set()).add((row.start + 1, row.end))
             previous = intervals.get(gene_id)
             if previous is None:
                 intervals[gene_id] = Gene(row.seqid, row.start, row.end, gene_id, row.strand)
@@ -464,7 +467,11 @@ def _annotation_loci(
 
 
 def annotation_locus_order(
-    gff_path: str | Path, *, feature: str, attribute: str
+    gff_path: str | Path,
+    *,
+    feature: str,
+    attribute: str,
+    intervals_by_locus: dict[str, set[tuple[int, int]]] | None = None,
 ) -> tuple[Gene, ...]:
     """Order all annotated loci, including loci without supplied sequences."""
     by_locus: dict[str, Gene] = {}
@@ -487,6 +494,7 @@ def annotation_locus_order(
     # A gene/ID row already names its physical locus. For other feature/ID
     # combinations, retain the existing parent-resolution path.
     direct = feature == "gene" and attribute == "ID"
+    selected_loci: set[str] = set()
     if not direct:
         identifiers = {
             identifier
@@ -494,10 +502,17 @@ def annotation_locus_order(
             if row.feature == feature
             for identifier in row.attributes.get(attribute, ())
         }
-        intervals = _mapped_gff_intervals(gff_path, feature, attribute, identifiers)
+        pieces: dict[str, set[tuple[int, int]]] | None = (
+            {} if intervals_by_locus is not None else None
+        )
+        intervals = _mapped_gff_intervals(gff_path, feature, attribute, identifiers, pieces)
         loci, _unresolved = _annotation_loci(gff_path, feature, attribute, identifiers)
         for gene in intervals:
-            add(gene, loci[gene.gene_id])
+            locus = loci[gene.gene_id]
+            add(gene, locus)
+            if pieces is not None and intervals_by_locus is not None:
+                selected_loci.add(locus)
+                intervals_by_locus.setdefault(locus, set()).update(pieces[gene.gene_id])
     for row in _iter_gff(gff_path):
         if row.feature == "gene":
             if direct:
@@ -517,6 +532,8 @@ def annotation_locus_order(
                 (),
             )
             for locus in values:
+                if intervals_by_locus is not None and locus not in selected_loci:
+                    intervals_by_locus.setdefault(locus, set()).add((row.start + 1, row.end))
                 add(Gene(row.seqid, row.start, row.end, locus, row.strand), locus)
     return tuple(
         sorted(

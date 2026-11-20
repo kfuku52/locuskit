@@ -7,6 +7,8 @@ untagged development milestones, not published release artifacts. See the
 
 ## Unreleased
 
+- Preserve multipart locus intervals and wrap neighborhoods on explicitly circular replicons. Reuse sorted contigs across batch jobs.
+
 - Share locus tables, staged protein sequences, hit tables, and homology groups
   across neighborhood jobs to reduce repeated I/O.
 - Support bounded concurrent neighborhood searches, explicit representative
