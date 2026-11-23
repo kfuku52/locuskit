@@ -7,7 +7,7 @@ type: software
 authors:
   - family-names: Fukushima
     given-names: Kenji
-version: 0.2.0.dev13
+version: 0.2.0.dev14
 license: MIT
 repository-code: https://github.com/kfuku52/locuskit
 references:

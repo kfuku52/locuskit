@@ -236,7 +236,7 @@ def parse_attributes(value: str) -> dict[str, tuple[str, ...]]:
                 raise ValueError("Expected a GFF key=value attribute")
             key, raw = attribute_field.split("=", 1)
             for item in raw.split(","):
-                item = unquote(item.strip().strip("\"'"))
+                item = unquote(item.strip())
                 if item:
                     parsed[key].append(item)
     else:
@@ -275,7 +275,7 @@ def _parse_strand(value: str, format_name: str, location: str) -> str:
 def _iter_gff(path: str | Path) -> Iterator[_GffRecord]:
     with open_text(path) as handle:
         for line_number, line in enumerate(handle, start=1):
-            if line.startswith("##FASTA"):
+            if line.startswith("##FASTA") and line.strip() == "##FASTA":
                 break
             if not line.strip() or line.startswith("#"):
                 continue
@@ -343,31 +343,100 @@ def _select_gff_mapping(
         ),
     )
     if not selected_matches:
-        observed_feature_text = ", ".join(sorted(observed_features, key=natural_key)) or "none"
-        observed_attribute_text = ", ".join(sorted(observed_attributes, key=natural_key)) or "none"
-        raise ValueError(
-            "No GFF identifiers matched the CDS FASTA. "
-            f"Observed features: {observed_feature_text}. Observed attributes: {observed_attribute_text}."
-        )
+        raise _no_annotation_match(observed_features, observed_attributes)
 
     return selected_pair[0], selected_pair[1], selected_matches
 
 
-def _mapped_gff_intervals(
+def _no_annotation_match(features: set[str], attributes: set[str]) -> ValueError:
+    feature_text = ", ".join(sorted(features, key=natural_key)) or "none"
+    attribute_text = ", ".join(sorted(attributes, key=natural_key)) or "none"
+    return ValueError(
+        "No GFF identifiers matched the CDS FASTA. "
+        f"Observed features: {feature_text}. Observed attributes: {attribute_text}."
+    )
+
+
+def _gene_locus_ids(row: _GffRecord) -> tuple[str, ...]:
+    attrs = row.attributes
+    return next(
+        (attrs[key] for key in ("ID", "gene_id", "locus_tag", "Name") if attrs.get(key)), ()
+    )
+
+
+def _ordered_genes(genes: Iterable[Gene]) -> tuple[Gene, ...]:
+    sequence_keys: dict[str, tuple[object, ...]] = {}
+
+    def key(gene: Gene) -> tuple[tuple[object, ...], int, int, str]:
+        if gene.seqid not in sequence_keys:
+            sequence_keys[gene.seqid] = natural_key(gene.seqid)
+        return sequence_keys[gene.seqid], gene.start, gene.end, gene.gene_id
+
+    return tuple(sorted(genes, key=key))
+
+
+def _mapped_gff_annotation(
     gff_path: str | Path,
-    selected_feature: str,
-    selected_attribute: str,
-    selected_matches: set[str],
+    feature: str,
+    attribute: str,
+    selected: set[str] | None,
+    *,
     pieces: dict[str, set[tuple[int, int]]] | None = None,
-) -> tuple[Gene, ...]:
+    gene_rows: list[Gene] | None = None,
+    require_match: bool = False,
+) -> tuple[tuple[Gene, ...], dict[str, str], int]:
+    """Collect matched intervals and their parent graph while streaming the annotation."""
     intervals: dict[str, Gene] = {}
+    parents: dict[str, tuple[str, ...]] = {}
+    candidates: dict[str, set[str]] = defaultdict(set)
+    known_loci: set[str] = set()
+    explicit_loci: set[str] = set()
+    observed_features: set[str] = set()
+    observed_attributes: set[str] = set()
     for row in _iter_gff(gff_path):
-        if row.feature != selected_feature:
+        row_feature, attrs = row.feature, row.attributes
+        if require_match:
+            observed_features.add(row_feature)
+            observed_attributes.update(attrs)
+        gene_ids = attrs.get("gene_id", ())
+        known_loci.update(gene_ids)
+        explicit_loci.update(gene_ids)
+        ancestors = gene_ids or attrs.get("Parent", ())
+        if row_feature == "gene":
+            row_ids = set(attrs.get("ID", ())) | set(attrs.get("transcript_id", ()))
+            known_loci.update(row_ids)
+            explicit_loci.update(row_ids)
+            if gene_rows is not None:
+                gene_rows.extend(
+                    Gene(row.seqid, row.start, row.end, locus, row.strand)
+                    for locus in _gene_locus_ids(row)
+                )
+        else:
+            if row_feature in {"mRNA", "transcript"}:
+                known_loci.update(ancestors)
+            if ancestors:
+                for identifier in (*attrs.get("ID", ()), *attrs.get("transcript_id", ())):
+                    links = ancestors
+                    if identifier in links:
+                        links = tuple(parent for parent in links if parent != identifier)
+                    if links:
+                        previous_links = parents.setdefault(identifier, links)
+                        if previous_links != links:
+                            parents[identifier] = tuple(dict.fromkeys((*previous_links, *links)))
+        if row_feature != feature:
             continue
-        for gene_id in row.attributes.get(selected_attribute, ()):
-            if gene_id not in selected_matches:
+        for gene_id in attrs.get(attribute, ()):
+            if selected is not None and gene_id not in selected:
                 continue
             validate_gene_identifier(gene_id, "GFF", f"{gff_path}:{row.line_number}")
+            if row_feature == "gene":
+                candidates[gene_id].update(attrs.get("ID", ()) or gene_ids or (gene_id,))
+                known_loci.update(candidates[gene_id])
+            elif attribute == "Parent" and not gene_ids:
+                # A shared CDS segment may map to each transcript independently.
+                candidates[gene_id].add(gene_id)
+            elif ancestors:
+                candidates[gene_id].update(ancestors)
             if pieces is not None:
                 pieces.setdefault(gene_id, set()).add((row.start + 1, row.end))
             previous = intervals.get(gene_id)
@@ -392,49 +461,8 @@ def _mapped_gff_intervals(
                 next(iter(known_strands), "."),
             )
 
-    return tuple(
-        sorted(
-            intervals.values(),
-            key=lambda gene: (natural_key(gene.seqid), gene.start, gene.end, gene.gene_id),
-        )
-    )
-
-
-def _annotation_loci(
-    gff_path: str | Path, feature: str, attribute: str, selected: set[str]
-) -> tuple[dict[str, str], int]:
-    parents: dict[str, set[str]] = defaultdict(set)
-    candidates: dict[str, set[str]] = defaultdict(set)
-    known_loci: set[str] = set()
-    explicit_loci: set[str] = set()
-    for row in _iter_gff(gff_path):
-        row_feature, attrs = row.feature, row.attributes
-        row_ids = set(attrs.get("ID", ())) | set(attrs.get("transcript_id", ()))
-        ancestors = set(attrs.get("gene_id", ())) or set(attrs.get("Parent", ()))
-        known_loci.update(attrs.get("gene_id", ()))
-        explicit_loci.update(attrs.get("gene_id", ()))
-        if row_feature == "gene":
-            known_loci.update(row_ids)
-            explicit_loci.update(row_ids)
-        elif row_feature in {"mRNA", "transcript"}:
-            known_loci.update(ancestors)
-        if row_feature != "gene":
-            for identifier in row_ids:
-                parents[identifier].update(ancestors - {identifier})
-        if row_feature != feature:
-            continue
-        for identifier in set(attrs.get(attribute, ())) & selected:
-            if row_feature == "gene":
-                candidates[identifier].update(
-                    attrs.get("ID", ()) or attrs.get("gene_id", ()) or (identifier,)
-                )
-                known_loci.update(candidates[identifier])
-            elif attribute == "Parent" and not attrs.get("gene_id"):
-                # A shared CDS segment can name several transcripts. Resolve
-                # each mapped transcript separately, not all of its siblings.
-                candidates[identifier].add(identifier)
-            else:
-                candidates[identifier].update(ancestors)
+    if require_match and not intervals:
+        raise _no_annotation_match(observed_features, observed_attributes)
 
     def roots(identifier: str, seen: frozenset[str] = frozenset()) -> set[str]:
         # GTF gene_id and transcript_id occupy separate namespaces.
@@ -448,13 +476,13 @@ def _annotation_loci(
 
     loci: dict[str, str] = {}
     unresolved = 0
-    for identifier in sorted(selected, key=natural_key):
-        ancestors = candidates.get(identifier, set())
-        if not ancestors:
+    for identifier in sorted(intervals, key=natural_key):
+        root_candidates = candidates.get(identifier)
+        if not root_candidates:
             unresolved += 1
             loci[identifier] = identifier
             continue
-        resolved = set().union(*(roots(parent) for parent in ancestors))
+        resolved = set().union(*(roots(parent) for parent in root_candidates))
         if len(resolved) != 1:
             raise ValueError(
                 f"GFF identifier {identifier!r} maps to multiple gene loci: {', '.join(sorted(resolved))}"
@@ -463,7 +491,7 @@ def _annotation_loci(
         loci[identifier] = locus
         if locus not in known_loci:
             unresolved += 1
-    return loci, unresolved
+    return _ordered_genes(intervals.values()), loci, unresolved
 
 
 def annotation_locus_order(
@@ -494,53 +522,41 @@ def annotation_locus_order(
     # A gene/ID row already names its physical locus. For other feature/ID
     # combinations, retain the existing parent-resolution path.
     direct = feature == "gene" and attribute == "ID"
-    selected_loci: set[str] = set()
-    if not direct:
-        identifiers = {
-            identifier
-            for row in _iter_gff(gff_path)
-            if row.feature == feature
-            for identifier in row.attributes.get(attribute, ())
-        }
+    if direct:
+        for row in _iter_gff(gff_path):
+            if row.feature != "gene":
+                continue
+            ids = row.attributes.get("ID", ())
+            if len(ids) > 1 and len(set(ids)) > 1:
+                raise ValueError(
+                    f"Gene row names multiple gene loci at {gff_path}:{row.line_number}"
+                )
+            for identifier in ids:
+                validate_gene_identifier(identifier, "GFF", f"{gff_path}:{row.line_number}")
+            for locus in _gene_locus_ids(row):
+                if intervals_by_locus is not None:
+                    intervals_by_locus.setdefault(locus, set()).add((row.start + 1, row.end))
+                add(Gene(row.seqid, row.start, row.end, locus, row.strand), locus)
+    else:
         pieces: dict[str, set[tuple[int, int]]] | None = (
             {} if intervals_by_locus is not None else None
         )
-        intervals = _mapped_gff_intervals(gff_path, feature, attribute, identifiers, pieces)
-        loci, _unresolved = _annotation_loci(gff_path, feature, attribute, identifiers)
+        selected_loci: set[str] = set()
+        gene_rows: list[Gene] = []
+        intervals, loci, _unresolved = _mapped_gff_annotation(
+            gff_path, feature, attribute, None, pieces=pieces, gene_rows=gene_rows
+        )
         for gene in intervals:
             locus = loci[gene.gene_id]
             add(gene, locus)
             if pieces is not None and intervals_by_locus is not None:
                 selected_loci.add(locus)
                 intervals_by_locus.setdefault(locus, set()).update(pieces[gene.gene_id])
-    for row in _iter_gff(gff_path):
-        if row.feature == "gene":
-            if direct:
-                ids = row.attributes.get("ID", ())
-                if len(ids) > 1 and len(set(ids)) > 1:
-                    raise ValueError(
-                        f"Gene row names multiple gene loci at {gff_path}:{row.line_number}"
-                    )
-                for identifier in ids:
-                    validate_gene_identifier(identifier, "GFF", f"{gff_path}:{row.line_number}")
-            values = next(
-                (
-                    row.attributes[key]
-                    for key in ("ID", "gene_id", "locus_tag", "Name")
-                    if row.attributes.get(key)
-                ),
-                (),
-            )
-            for locus in values:
-                if intervals_by_locus is not None and locus not in selected_loci:
-                    intervals_by_locus.setdefault(locus, set()).add((row.start + 1, row.end))
-                add(Gene(row.seqid, row.start, row.end, locus, row.strand), locus)
-    return tuple(
-        sorted(
-            by_locus.values(),
-            key=lambda gene: (natural_key(gene.seqid), gene.start, gene.end, gene.gene_id),
-        )
-    )
+        for gene in gene_rows:
+            if intervals_by_locus is not None and gene.gene_id not in selected_loci:
+                intervals_by_locus.setdefault(gene.gene_id, set()).add((gene.start + 1, gene.end))
+            add(gene, gene.gene_id)
+    return _ordered_genes(by_locus.values())
 
 
 def annotation_to_genes(
@@ -555,20 +571,15 @@ def annotation_to_genes(
 
     features = (feature,) if feature else FEATURE_PRIORITY
     attributes = (attribute,) if attribute else ATTRIBUTE_PRIORITY
-    selected_feature, selected_attribute, selected_matches = _select_gff_mapping(
-        gff_path,
-        fasta_ids,
-        features,
-        attributes,
-    )
-    genes = _mapped_gff_intervals(
-        gff_path,
-        selected_feature,
-        selected_attribute,
-        selected_matches,
-    )
-    loci, unresolved = _annotation_loci(
-        gff_path, selected_feature, selected_attribute, selected_matches
+    fixed_mapping = len(features) == len(attributes) == 1
+    if fixed_mapping:
+        selected_feature, selected_attribute, selected = features[0], attributes[0], fasta_ids
+    else:
+        selected_feature, selected_attribute, selected = _select_gff_mapping(
+            gff_path, fasta_ids, features, attributes
+        )
+    genes, loci, unresolved = _mapped_gff_annotation(
+        gff_path, selected_feature, selected_attribute, selected, require_match=fixed_mapping
     )
     return AnnotationMapping(
         feature=selected_feature,

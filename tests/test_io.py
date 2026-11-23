@@ -41,6 +41,50 @@ def test_annotation_mapping_detects_feature_and_attribute(tmp_path):
     ]
 
 
+def test_gff3_terminal_apostrophe_keeps_gene_loci_distinct(tmp_path):
+    fasta = write(tmp_path / "cds.fa", ">t1\nATG\n>t2\nATGATG\n>t3\nATG\n")
+    gff = write(
+        tmp_path / "genes.gff3",
+        "##gff-version 3\n"
+        "chr1\ttest\tgene\t1\t3\t.\t+\t.\tID=gene-TIL\n"
+        "chr1\ttest\tmRNA\t1\t3\t.\t+\t.\tID=t1;Parent=gene-TIL\n"
+        "chr2\ttest\tgene\t1\t6\t.\t-\t.\tID=gene-TIL'\n"
+        "chr2\ttest\tmRNA\t1\t6\t.\t-\t.\tID=t2;Parent=gene-TIL'\n"
+        "chr2\ttest\tmRNA\t1\t3\t.\t-\t.\tID=t3;Parent=gene-TIL%27\n",
+    )
+    prepared = prepare_genome("literal", fasta, gff, tmp_path, isoform_policy="longest")
+    assert prepared.mapping.locus_by_id == {"t1": "gene-TIL", "t2": "gene-TIL'", "t3": "gene-TIL'"}
+    assert read_fasta_ids(prepared.cds_path) == {"t1", "t2"}
+    assert prepared.mapping.collapsed_isoform_count == 1
+
+
+def test_gff3_only_exact_fasta_directive_ends_annotation(tmp_path):
+    gff = write(
+        tmp_path / "genes.gff3",
+        "##gff-version 3\n"
+        "##FASTA-example is a comment\n"
+        "chr1\ttest\tgene\t1\t3\t.\t+\t.\tID=g1\n"
+        "##FASTA\n>chr1\nATG\n",
+    )
+    expected = (Gene("chr1", 0, 3, "g1", "+"),)
+    assert annotation_to_genes(gff, {"g1"}, feature="gene", attribute="ID").genes == expected
+    assert annotation_locus_order(gff, feature="gene", attribute="ID") == expected
+
+
+def test_explicit_mapping_resolves_parents_declared_after_cds(tmp_path):
+    gff = write(
+        tmp_path / "genes.gff3",
+        "chr1\ttest\tCDS\t3\t8\t.\t+\t0\tID=c;Parent=t\n"
+        "chr1\ttest\tCDS\t13\t18\t.\t+\t0\tID=c;Parent=t\n"
+        "chr1\ttest\tmRNA\t2\t19\t.\t+\t.\tID=t;Parent=g\n"
+        "chr1\ttest\tgene\t1\t20\t.\t+\t.\tID=g\n",
+    )
+    mapping = annotation_to_genes(gff, {"t"}, feature="CDS", attribute="Parent")
+    assert mapping.genes == (Gene("chr1", 2, 18, "t", "+"),)
+    assert mapping.locus_by_id == {"t": "g"}
+    assert mapping.unresolved_locus_count == 0
+
+
 def test_full_annotation_locus_order_includes_unsequenced_and_gene_only_loci(tmp_path):
     gff = write(
         tmp_path / "all.gff3",

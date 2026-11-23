@@ -7,6 +7,10 @@ untagged development milestones, not published release artifacts. See the
 
 ## Unreleased
 
+- Preserve literal quotes in GFF3 identifiers and recognize `##FASTA` only as
+  a complete directive. Collect mapped coordinates and parent relationships
+  in a single annotation scan to reduce repeated reads and peak memory.
+
 - Preserve multipart locus intervals and wrap neighborhoods on explicitly circular replicons. Reuse sorted contigs across batch jobs.
 
 - Share locus tables, staged protein sequences, hit tables, and homology groups

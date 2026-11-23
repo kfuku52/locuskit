@@ -34,9 +34,10 @@ FASTA IDs, rather than combining matches from different pairs. Ties prefer
 features in the order mRNA, transcript, gene, CDS, then attributes in the order
 ID, Name, transcript_id, gene_id, protein_id, locus_tag, Parent, coge_fid.
 Matching is case-sensitive. GFF3 `key=value` attributes are split on commas
-before percent-decoding each value. GTF `key "value"` attributes are literal
-scalars: commas, equals signs, and percent sequences inside the quotes remain
-part of the value. Semicolons inside quoted GTF notes do not start new
+before percent-decoding each value. Quotes and apostrophes in GFF3 values remain
+literal, including at the ends of identifiers. GTF uses scalar `key "value"`
+attributes. Quoted GTF values preserve commas, equals signs, and percent
+sequences. Semicolons inside quoted GTF notes do not start new
 attributes. Malformed attribute syntax reports the source path and line.
 Missing selected attributes contribute no match. If the mapping threshold is
 explicitly lowered, unmatched FASTA records are omitted from prepared BED/CDS.
